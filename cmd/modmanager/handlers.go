@@ -1,0 +1,232 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"log"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/chicohaager/lintux-modkit/httpx"
+	"github.com/chicohaager/modmanager/internal/catalog"
+	"github.com/chicohaager/modmanager/internal/sysapps"
+)
+
+// catalogTimeout covers downloading an image and zpkg installing it.
+const catalogTimeout = 10 * time.Minute
+
+// actionMu serialises every changing action: hiding an app and zpkg
+// installing a module both run systemd-sysext refresh over all of /usr.
+var actionMu sync.Mutex
+
+// catalogService is what the handlers need from catalog.Catalog.
+type catalogService interface {
+	List(ctx context.Context) ([]catalog.Entry, []string, error)
+	Install(ctx context.Context, id string) error
+	Uninstall(ctx context.Context, name string) error
+	AddRepo(ctx context.Context, repo string) (string, error)
+	RemoveRepo(repo string) error
+}
+
+// appService is what the handlers need from sysapps.Manager; tests fake it.
+type appService interface {
+	List(ctx context.Context) ([]sysapps.App, error)
+	Hide(ctx context.Context, id string) error
+	Restore(ctx context.Context, id string) error
+	Purge(ctx context.Context, id, confirm string) error
+}
+
+func newMux(svc appService, cat catalogService, verify func(http.Handler) http.Handler) *http.ServeMux {
+	mux := http.NewServeMux()
+	logged := httpx.Logging("modmanager", maxRequestBody)
+	mux.Handle(routePrefix+"/health", logged(http.HandlerFunc(healthHandler)))
+	mux.Handle(routePrefix+"/apps", logged(verify(appsHandler(svc))))
+	mux.Handle(routePrefix+"/apps/hide", logged(verify(actionHandler(svc, "hide"))))
+	mux.Handle(routePrefix+"/apps/restore", logged(verify(actionHandler(svc, "restore"))))
+	mux.Handle(routePrefix+"/apps/purge", logged(verify(actionHandler(svc, "purge"))))
+	mux.Handle(routePrefix+"/catalog", logged(verify(catalogListHandler(cat))))
+	mux.Handle(routePrefix+"/catalog/install", logged(verify(catalogActionHandler(cat, "install"))))
+	mux.Handle(routePrefix+"/catalog/uninstall", logged(verify(catalogActionHandler(cat, "uninstall"))))
+	mux.Handle(routePrefix+"/catalog/repos", logged(verify(catalogActionHandler(cat, "add-repo"))))
+	mux.Handle(routePrefix+"/catalog/repos/remove", logged(verify(catalogActionHandler(cat, "remove-repo"))))
+	return mux
+}
+
+func healthHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		httpx.MethodNotAllowed(w)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": version})
+}
+
+func appsHandler(svc appService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			httpx.MethodNotAllowed(w)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), actionTimeout)
+		defer cancel()
+		apps, err := svc.List(ctx)
+		if err != nil {
+			writeServiceError(w, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"apps": apps})
+	}
+}
+
+type actionRequest struct {
+	ID      string `json:"id"`
+	Confirm string `json:"confirm"`
+}
+
+func actionHandler(svc appService, action string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			httpx.MethodNotAllowed(w)
+			return
+		}
+		var req actionRequest
+		if !httpx.Decode(w, r, &req) {
+			return
+		}
+		if req.ID == "" {
+			httpx.WriteError(w, http.StatusBadRequest, "missing_id", "id is required")
+			return
+		}
+		// The action outlives a closed browser tab: a refresh cut in half
+		// would leave /usr unmerged.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), actionTimeout)
+		defer cancel()
+		actionMu.Lock()
+		defer actionMu.Unlock()
+		var err error
+		switch action {
+		case "hide":
+			err = svc.Hide(ctx, req.ID)
+		case "restore":
+			err = svc.Restore(ctx, req.ID)
+		case "purge":
+			err = svc.Purge(ctx, req.ID, req.Confirm)
+		}
+		if err != nil {
+			log.Printf("[modmanager] %s %s: %v", action, req.ID, err)
+			writeServiceError(w, err)
+			return
+		}
+		log.Printf("[modmanager] %s %s: done", action, req.ID)
+		apps, err := svc.List(ctx)
+		if err != nil {
+			writeServiceError(w, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"apps": apps})
+	}
+}
+
+func writeServiceError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, sysapps.ErrUnknown):
+		httpx.WriteError(w, http.StatusNotFound, "unknown_app", err.Error())
+	case errors.Is(err, sysapps.ErrBlocked):
+		httpx.WriteError(w, http.StatusConflict, "blocked", err.Error())
+	case errors.Is(err, sysapps.ErrNotHid):
+		httpx.WriteError(w, http.StatusConflict, "not_hidden", err.Error())
+	case errors.Is(err, sysapps.ErrMedia):
+		httpx.WriteError(w, http.StatusConflict, "media_found", err.Error())
+	case errors.Is(err, sysapps.ErrConfirm):
+		httpx.WriteError(w, http.StatusBadRequest, "confirm_mismatch", err.Error())
+	default:
+		httpx.WriteError(w, http.StatusInternalServerError, "internal", err.Error())
+	}
+}
+
+func catalogListHandler(cat catalogService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			httpx.MethodNotAllowed(w)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
+		defer cancel()
+		entries, repos, err := cat.List(ctx)
+		if err != nil {
+			writeCatalogError(w, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"entries": entries, "repos": repos})
+	}
+}
+
+type catalogRequest struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Repo string `json:"repo"`
+}
+
+func catalogActionHandler(cat catalogService, action string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			httpx.MethodNotAllowed(w)
+			return
+		}
+		var req catalogRequest
+		if !httpx.Decode(w, r, &req) {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), catalogTimeout)
+		defer cancel()
+		actionMu.Lock()
+		var err error
+		target := req.ID + req.Name + req.Repo
+		switch action {
+		case "install":
+			err = cat.Install(ctx, req.ID)
+		case "uninstall":
+			err = cat.Uninstall(ctx, req.Name)
+		case "add-repo":
+			_, err = cat.AddRepo(ctx, req.Repo)
+		case "remove-repo":
+			err = cat.RemoveRepo(req.Repo)
+		}
+		actionMu.Unlock()
+		if err != nil {
+			log.Printf("[modmanager] catalog %s %s: %v", action, target, err)
+			writeCatalogError(w, err)
+			return
+		}
+		log.Printf("[modmanager] catalog %s %s: done", action, target)
+		entries, repos, err := cat.List(ctx)
+		if err != nil {
+			writeCatalogError(w, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"entries": entries, "repos": repos})
+	}
+}
+
+func writeCatalogError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, catalog.ErrBadRepo):
+		httpx.WriteError(w, http.StatusBadRequest, "bad_repo", err.Error())
+	case errors.Is(err, catalog.ErrUnknown):
+		httpx.WriteError(w, http.StatusNotFound, "unknown_entry", err.Error())
+	case errors.Is(err, catalog.ErrNoImage):
+		httpx.WriteError(w, http.StatusUnprocessableEntity, "no_image", err.Error())
+	case errors.Is(err, catalog.ErrNoChecksum):
+		httpx.WriteError(w, http.StatusUnprocessableEntity, "no_checksum", err.Error())
+	case errors.Is(err, catalog.ErrChecksum):
+		httpx.WriteError(w, http.StatusUnprocessableEntity, "checksum_mismatch", err.Error())
+	case errors.Is(err, catalog.ErrOwn):
+		httpx.WriteError(w, http.StatusConflict, "own_installer", err.Error())
+	case errors.Is(err, catalog.ErrProtected):
+		httpx.WriteError(w, http.StatusConflict, "protected", err.Error())
+	case errors.Is(err, catalog.ErrNotInstalled):
+		httpx.WriteError(w, http.StatusConflict, "not_installed", err.Error())
+	default:
+		httpx.WriteError(w, http.StatusBadGateway, "failed", err.Error())
+	}
+}

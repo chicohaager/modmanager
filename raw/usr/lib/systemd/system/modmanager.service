@@ -1,0 +1,29 @@
+[Unit]
+Description=Module Manager for ZimaOS
+Documentation=https://github.com/chicohaager/modmanager
+After=network-online.target zimaos-gateway.service zimaos-user.service zimaos-app-management.service
+Wants=network-online.target
+# Backups of user.db and saved manifests live under /DATA/AppData/modmanager.
+RequiresMountsFor=/DATA/AppData
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/modmanager
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+# Needs root in the host's mount namespace: it masks sysexts in
+# /etc/extensions, writes a directory extension in /var/lib/extensions and
+# runs systemd-sysext refresh, which must change the host's /usr. Any
+# directive that gives the service its own mount namespace (ProtectSystem,
+# ProtectHome, PrivateTmp, ProtectKernelTunables, ProtectKernelLogs,
+# ProtectControlGroups, ReadOnlyPaths, …) makes that refresh land in the
+# service's private view only — measured on 1.8.0: hide reported done, the
+# dashboard did not change. unit_test.go keeps them out.
+RestrictRealtime=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+{
+  "name": "modmanager",
+  "ui": {
+    "name": "modmanager",
+    "title": { "en_us": "Module Manager" },
+    "prefetch": true,
+    "show": true,
+    "entry": "/modules/modmanager/index.html",
+    "icon": "/modules/modmanager/appicon.svg",
+    "description": "Hide or restore the apps ZimaOS ships built in, and manage installed modules",
+    "formality": {
+      "type": "newtab",
+      "props": { "width": "100vh", "height": "100vh", "hasModalCard": true, "animation": "zoom-in" }
+    }
+  },
+  "services": [ { "name": "modmanager" } ]
+}
