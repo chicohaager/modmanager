@@ -1,0 +1,27 @@
+# Releasing
+
+1. **Version and build.** Set `version` in `cmd/modmanager/main.go`, then build and commit everything the build changed (it writes the version into `index.html`):
+
+   ```sh
+   sh build.sh amd64
+   git commit -am "<version>"
+   git status --porcelain     # must be empty: the image is built from the work tree, so it matches this commit
+   ```
+
+   Install `dist/modmanager-amd64.raw` on a ZimaOS host and test it there.
+
+2. **Release.** Tag the tested commit and upload only architecture-specific images with their checksums:
+
+   ```sh
+   gh release create v<version> --target <commit> dist/modmanager-amd64.raw dist/modmanager-amd64.raw.sha256
+   ```
+
+   Do not upload the arch-less `dist/modmanager.raw`: when a release has no image for the host's CPU, the catalog takes an arch-less one (`internal/catalog/catalog.go`, `pick`), so an arm64 host would install the amd64 image. Add `dist/modmanager-arm64.raw` (+ `.sha256`) only after it was tested on arm64.
+
+3. **Check the release** against the host that runs it:
+
+   ```sh
+   python3 scripts/catalog-e2e.py --url http://<zimaos-host> --user <name> --password-file <file>
+   ```
+
+   It must end with `✓ … release image picked, installed version current` and leave the catalog as it was.
