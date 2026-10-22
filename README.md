@@ -50,9 +50,18 @@ Output in `dist/`: `modmanager-amd64.raw` (+ `.sha256`) and `modmanager.raw`.
 
 ## Install (on the ZimaOS host)
 
+In the ZimaOS terminal (amd64):
+
 ```sh
+cd /tmp
+curl -fsSLO https://github.com/chicohaager/modmanager/releases/latest/download/modmanager-amd64.raw
+curl -fsSLO https://github.com/chicohaager/modmanager/releases/latest/download/modmanager-amd64.raw.sha256
+sha256sum -c modmanager-amd64.raw.sha256       # must print: modmanager-amd64.raw: OK
+mv modmanager-amd64.raw modmanager.raw         # zpkg takes the module name from the file name
 sudo zpkg install /tmp/modmanager.raw          # update: sudo zpkg remove modmanager first
 ```
+
+The rename is required: `zpkg install /tmp/modmanager-amd64.raw` fails with `module not pass validate` (measured on ZimaOS 1.8.0, 22.10.2026); under the name `modmanager.raw` the same image installs.
 
 The service installs its own boot watchdog units in `/etc/systemd/system` (lintux-modkit `watchdog`).
 

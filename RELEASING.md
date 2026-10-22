@@ -8,7 +8,7 @@
    git status --porcelain     # must be empty: the image is built from the work tree, so it matches this commit
    ```
 
-   Install `dist/modmanager-amd64.raw` on a ZimaOS host and test it there.
+   Install `dist/modmanager-amd64.raw` on a ZimaOS host and test it there — copy it as `/tmp/modmanager.raw`: `zpkg` takes the module name from the file name and refuses `modmanager-amd64.raw` (`module not pass validate`).
 
 2. **Release.** Tag the tested commit and upload only architecture-specific images with their checksums:
 
