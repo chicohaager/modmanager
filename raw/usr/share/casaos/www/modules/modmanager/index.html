@@ -11,13 +11,13 @@
     // Apply the stored theme before first paint so dark users never see a white flash.
     try { var t = localStorage.getItem('modmanager.theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
   </script>
-  <link rel="stylesheet" href="./styles.css?v=0.2.3">
+  <link rel="stylesheet" href="./styles.css?v=0.2.4">
 </head>
 <body>
   <header>
     <div class="title-row">
       <h1><img src="./appicon.svg" alt="">Module Manager</h1>
-      <span class="version" id="app-version">v0.2.3</span>
+      <span class="version" id="app-version">v0.2.4</span>
       <div class="header-tools">
         <select id="theme-select" aria-label="Theme">
           <option value="auto">Theme: auto</option>
@@ -92,6 +92,6 @@
     </div>
   </div>
 
-  <script src="./app.js?v=0.2.3"></script>
+  <script src="./app.js?v=0.2.4"></script>
 </body>
 </html>

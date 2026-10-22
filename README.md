@@ -1,6 +1,6 @@
 # Module Manager for ZimaOS
 
-**Version 0.2.3** · ZimaOS 1.8.0 (amd64) · sysext module `modmanager`
+**Version 0.2.4** · ZimaOS 1.8.0 (amd64) · sysext module `modmanager`
 
 Hide or restore the apps ZimaOS ships built in — Photos, PeerDrop, ZVM and the Backup tile — and see every installed module. Nothing is deleted unless you ask for it: **Restore** brings an app back exactly as ZimaOS shipped it.
 
@@ -30,7 +30,7 @@ The Backup tile can only be hidden by writing into `/var/lib/casaos/db/user.db`,
 
 ## Catalog
 
-Version 0.2.0 adds a catalog: the Lintux module repositories (cron, Sync & Backup, Web FTP Client installable here; ZFW, mergerfs + SnapRAID and Tailscale with their own installer, whose command is shown — it must run as root on the host, the UI says so above the command), and any GitHub repository you enter. The Mod Store list of ZimaOS' module management is not shown. Installation goes through `zpkg`, IceWhale's module CLI. Files is not listed among the built-in apps: ZimaOS needs it.
+Version 0.2.0 adds a catalog: the Lintux module repositories (cron, Sync & Backup, Web FTP Client installable here; ZFW, mergerfs + SnapRAID and Tailscale with their own installer, whose command is shown — it must run as root on the host — paste it into the ZimaOS terminal; the UI says so above the command), and any GitHub repository you enter. The Mod Store list of ZimaOS' module management is not shown. Installation goes through `zpkg`, IceWhale's module CLI. Files is not listed among the built-in apps: ZimaOS needs it.
 
 A GitHub image is installed only when its release ships a sha256 checksum and the download matches it. **That proves the file arrived intact — not that the module's author can be trusted:** the checksum comes from the same release as the image. A module runs as root on the host. Add only repositories you trust; the UI marks them as third-party.
 
