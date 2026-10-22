@@ -254,7 +254,7 @@ function catalogCardHTML(e) {
   let body = '';
   let actions = '';
   if (e.installer === 'own' && e.command) {
-    body = `<div class="root-note"><span class="pill pill-root">root</span> Must run as root on the ZimaOS host: open an SSH session there and paste the command — <code>sudo</code> asks for your ZimaOS password.</div>
+    body = `<div class="root-note"><span class="pill pill-root">root</span> Must run as root: open the ZimaOS terminal, log in with your ZimaOS user and paste the command — <code>sudo</code> asks for your ZimaOS password.</div>
       <div class="cmd"><code>${esc(e.command)}</code><button class="btn-small" data-copy="${esc(e.command)}">Copy</button></div>
       <div class="app-sub">Needs its own installer (it sets up more than the image).</div>`;
   } else if (e.installer === 'zpkg') {
