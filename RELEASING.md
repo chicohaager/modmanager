@@ -25,3 +25,5 @@
    ```
 
    It must end with `✓ … release image picked, installed version current` and leave the catalog as it was.
+
+4. **Run the README install path as written**, line by line, in the ZimaOS terminal of a host (after `sudo zpkg remove modmanager`), then check `/modmanager/health` for the new version. The catalog check above does not cover it: on 22.10.2026 the README told users to install the downloaded file without renaming it, and `zpkg` refused it.
