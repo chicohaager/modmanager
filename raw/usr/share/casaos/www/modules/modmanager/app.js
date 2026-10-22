@@ -130,7 +130,7 @@ function cardHTML(a) {
   }
   return `<div class="card${a.hidden ? ' is-hidden' : ''}">
     <div class="app-head">${iconHTML(a)}
-      <div><div class="app-title">${esc(a.title)}</div><div class="app-sub mono">${esc(a.name)} · ${esc(KIND_LABEL[a.kind] || a.kind)}</div></div>
+      <div class="app-text"><div class="app-title">${esc(a.title)}</div><div class="app-sub mono">${esc(a.name)} · ${esc(KIND_LABEL[a.kind] || a.kind)}</div></div>
       ${stateHTML(a)}
     </div>
     ${blocked}
@@ -273,8 +273,8 @@ function catalogCardHTML(e) {
   if (e.source === 'repo') actions += `<button class="btn-small" data-cat="remove-repo" data-repo="${esc(e.repo)}" title="Remove from this list (an installed module stays installed)">Remove from list</button>`;
   return `<div class="card">
     <div class="app-head"><span class="app-icon">${esc((e.title || e.name || '?').charAt(0).toUpperCase())}</span>
-      <div><div class="app-title">${esc(e.title || e.name)}</div><div class="app-sub mono">${sub}</div>${repoLink}</div>
-      ${e.source === 'repo' ? '<span class="pill pill-warn">third-party</span>' : ''}${e.error && !e.installed ? '' : stateBadge(e)}
+      <div class="app-text"><div class="app-title">${esc(e.title || e.name)}</div><div class="app-sub mono">${sub}</div>${repoLink}</div>
+      <div class="app-badges">${e.source === 'repo' ? '<span class="pill pill-warn">third-party</span>' : ''}${e.error && !e.installed ? '' : stateBadge(e)}</div>
     </div>
     ${e.source === 'repo' ? '<div class="trust-note">Third-party repository you added: the checksum only proves the download is intact, not that the author is trustworthy. The module would run as root.</div>' : ''}
     ${note}${err}${body}
