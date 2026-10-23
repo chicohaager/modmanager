@@ -314,6 +314,57 @@ async function catalogAction(path, body, what) {
   }
 }
 
+// ---------- self-update ----------
+
+let selfTarget = null; // newer release tag, when there is one
+let selfArmed = false; // the update waits for a second click
+
+async function loadSelf() {
+  const s = await api(`${API_BASE}/self`);
+  const b = $('#self-update-btn');
+  selfTarget = s.update ? s.latest : null;
+  b.hidden = !selfTarget;
+  if (selfTarget) b.textContent = `Update to ${selfTarget}`;
+}
+
+// The backend downloads and checks the release, then a transient unit swaps the module:
+// Module Manager is gone for a few seconds. Wait until /health answers with the new version.
+async function selfUpdate() {
+  const b = $('#self-update-btn');
+  if (!selfTarget) return;
+  if (!selfArmed) {
+    selfArmed = true;
+    b.textContent = `Click again: update to ${selfTarget}`;
+    setTimeout(() => { selfArmed = false; if (selfTarget) b.textContent = `Update to ${selfTarget}`; }, 4000);
+    return;
+  }
+  selfArmed = false;
+  b.disabled = true;
+  setStatus(`Downloading and checking ${selfTarget}…`);
+  try {
+    const r = await api(`${API_BASE}/self/update`, { method: 'POST', body: {} });
+    setStatus(`Updating to ${r.to} — Module Manager restarts; this page reloads when it answers again…`);
+    const want = r.to.replace(/^v/, '');
+    let away = false;
+    const until = Date.now() + 180000;
+    while (Date.now() < until) {
+      await new Promise((ok) => setTimeout(ok, 3000));
+      let h = null;
+      try { h = await (await fetch(`${API_BASE}/health`, { cache: 'no-store' })).json(); } catch { away = true; continue; }
+      if (h && h.version === want) { location.reload(); return; }
+      if (h && away) {
+        setStatus(`The update to ${r.to} failed; ${h.version} is installed again. Log: /DATA/AppData/modmanager/self-update/log`, 'err');
+        return;
+      }
+    }
+    setStatus(`No answer from Module Manager after 3 minutes. Log: /DATA/AppData/modmanager/self-update/log`, 'err');
+  } catch (e) {
+    setStatus(describe(e), 'err');
+  } finally {
+    b.disabled = false;
+  }
+}
+
 // ---------- wiring ----------
 
 async function refreshAll() {
@@ -349,6 +400,8 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#purge-modal').hidden) closePurge(); });
   $('#refresh-btn').addEventListener('click', refreshAll);
+  $('#self-update-btn').addEventListener('click', selfUpdate);
+  loadSelf().catch(() => {}); // no answer about updates is not an error of this page
   $('#repo-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const repo = $('#repo-input').value.trim();

@@ -27,6 +27,8 @@ type catalogService interface {
 	Uninstall(ctx context.Context, name string) error
 	AddRepo(ctx context.Context, repo string) (string, error)
 	RemoveRepo(repo string) error
+	Self(ctx context.Context, installed string) catalog.SelfStatus
+	SelfUpdate(ctx context.Context, installed string) (string, error)
 }
 
 // appService is what the handlers need from sysapps.Manager; tests fake it.
@@ -50,6 +52,8 @@ func newMux(svc appService, cat catalogService, verify func(http.Handler) http.H
 	mux.Handle(routePrefix+"/catalog/uninstall", logged(verify(catalogActionHandler(cat, "uninstall"))))
 	mux.Handle(routePrefix+"/catalog/repos", logged(verify(catalogActionHandler(cat, "add-repo"))))
 	mux.Handle(routePrefix+"/catalog/repos/remove", logged(verify(catalogActionHandler(cat, "remove-repo"))))
+	mux.Handle(routePrefix+"/self", logged(verify(selfHandler(cat))))
+	mux.Handle(routePrefix+"/self/update", logged(verify(selfUpdateHandler(cat))))
 	return mux
 }
 
@@ -208,6 +212,42 @@ func catalogActionHandler(cat catalogService, action string) http.HandlerFunc {
 	}
 }
 
+// selfHandler reports whether a newer Module Manager release exists.
+func selfHandler(cat catalogService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			httpx.MethodNotAllowed(w)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
+		defer cancel()
+		httpx.WriteJSON(w, http.StatusOK, cat.Self(ctx, version))
+	}
+}
+
+// selfUpdateHandler downloads and checks the newest release and hands the swap to a
+// transient unit; the answer comes before Module Manager goes away for a few seconds.
+func selfUpdateHandler(cat catalogService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			httpx.MethodNotAllowed(w)
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), catalogTimeout)
+		defer cancel()
+		actionMu.Lock()
+		tag, err := cat.SelfUpdate(ctx, version)
+		actionMu.Unlock()
+		if err != nil {
+			log.Printf("[modmanager] self-update from %s: %v", version, err)
+			writeCatalogError(w, err)
+			return
+		}
+		log.Printf("[modmanager] self-update %s -> %s handed over", version, tag)
+		httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "updating", "from": version, "to": tag})
+	}
+}
+
 func writeCatalogError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, catalog.ErrBadRepo):
@@ -226,6 +266,8 @@ func writeCatalogError(w http.ResponseWriter, err error) {
 		httpx.WriteError(w, http.StatusConflict, "protected", err.Error())
 	case errors.Is(err, catalog.ErrCollision):
 		httpx.WriteError(w, http.StatusConflict, "collision", err.Error())
+	case errors.Is(err, catalog.ErrNotNewer):
+		httpx.WriteError(w, http.StatusConflict, "not_newer", err.Error())
 	case errors.Is(err, catalog.ErrNotInstalled):
 		httpx.WriteError(w, http.StatusConflict, "not_installed", err.Error())
 	default:
