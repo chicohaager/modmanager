@@ -652,3 +652,29 @@ func TestHealthWinsOverExtensionRelease(t *testing.T) {
 		}
 	}
 }
+
+// The sysext modules with a tile (lintux-modkit webmod) answer {"version": …}
+// without login at /<name>/health, <name> being the module name from the
+// repository zimaos-<name>-sysext (measured on .184, 2026-10-23).
+func TestSysextModulePresetsReadTheirHealthRoute(t *testing.T) {
+	want := map[string]bool{"admintools": false, "wireguard": false, "nebula": false, "restic": false}
+	for _, p := range Presets {
+		name, ok := strings.CutPrefix(p.Repo, "chicohaager/zimaos-")
+		if !ok || !strings.HasSuffix(name, "-sysext") {
+			continue
+		}
+		name = strings.TrimSuffix(name, "-sysext")
+		if _, listed := want[name]; !listed {
+			continue
+		}
+		want[name] = true
+		if p.Installer != "zpkg" || p.HealthPath != "/"+name+"/health" {
+			t.Errorf("%s: installer %q, health %q", p.Repo, p.Installer, p.HealthPath)
+		}
+	}
+	for name, seen := range want {
+		if !seen {
+			t.Errorf("no preset for zimaos-%s-sysext", name)
+		}
+	}
+}
