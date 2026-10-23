@@ -4,8 +4,12 @@
 #   test   go test ./... -race
 #   vuln   govulncheck with the toolchain from go.mod (advisory, like ZFW: a stdlib
 #          finding fixed in the next Go patch must not block a release tag)
-#   build  build.sh for amd64 and arm64 with lintux-modkit checked out next to it,
-#          the images as artifacts (arm64 is built, not tested on hardware)
+#   build  build.sh for amd64 and arm64, the images as artifacts (arm64 is built,
+#          not tested on hardware)
+#
+# go.mod replaces lintux-modkit with ../lintux-modkit, so every job checks out both
+# repositories side by side (without it: "replacement directory ../lintux-modkit does
+# not exist", measured 2026-10-23).
 
 name: CI
 
@@ -19,13 +23,20 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    working-directory: zima-modmanager
+
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with: { path: zima-modmanager }
+      - uses: actions/checkout@v7
+        with: { repository: chicohaager/lintux-modkit, path: lintux-modkit }
       - uses: actions/setup-go@v7
-        with: { go-version-file: go.mod, cache: false }
+        with: { go-version-file: zima-modmanager/go.mod, cache: false }
       - run: gofmt -l . | tee /tmp/fmt && [ ! -s /tmp/fmt ]
       - run: go vet ./...
       - run: node --check raw/usr/share/casaos/www/modules/modmanager/app.js
@@ -34,8 +45,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with: { path: zima-modmanager }
+      - uses: actions/checkout@v7
+        with: { repository: chicohaager/lintux-modkit, path: lintux-modkit }
       - uses: actions/setup-go@v7
-        with: { go-version-file: go.mod, cache: false }
+        with: { go-version-file: zima-modmanager/go.mod, cache: false }
       - run: go test -race -count=1 ./...
 
   vuln:
@@ -43,8 +57,11 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v7
+        with: { path: zima-modmanager }
+      - uses: actions/checkout@v7
+        with: { repository: chicohaager/lintux-modkit, path: lintux-modkit }
       - uses: actions/setup-go@v7
-        with: { go-version-file: go.mod, cache: false }
+        with: { go-version-file: zima-modmanager/go.mod, cache: false }
       - run: go install golang.org/x/vuln/cmd/govulncheck@latest
       - run: govulncheck ./...
 
@@ -57,13 +74,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with: { path: zima-modmanager }
-      # build.sh calls ../lintux-modkit/sysext/build-sysext.sh
       - uses: actions/checkout@v7
         with: { repository: chicohaager/lintux-modkit, path: lintux-modkit }
       - uses: actions/setup-go@v7
         with: { go-version-file: zima-modmanager/go.mod, cache: false }
       - run: sudo apt-get update && sudo apt-get install -y squashfs-tools
-      - run: sh zima-modmanager/build.sh ${{ matrix.arch }}
+      - run: sh build.sh ${{ matrix.arch }}
       - uses: actions/upload-artifact@v7
         with:
           name: modmanager-${{ matrix.arch }}
