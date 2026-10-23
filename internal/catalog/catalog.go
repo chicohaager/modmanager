@@ -105,6 +105,7 @@ type Catalog struct {
 	Run       Runner
 	HTTP      *http.Client
 	GitHubAPI string // https://api.github.com
+	GitHubWeb string // https://github.com — release pages, used when the API is rate limited
 	Gateway   string // http://127.0.0.1 — modules' health routes
 	StateDir  string // /DATA/AppData/modmanager
 	ExtDir    string // /var/lib/extensions
@@ -144,6 +145,7 @@ func New(run Runner) *Catalog {
 		Run:       run,
 		HTTP:      &http.Client{Timeout: 10 * time.Minute},
 		GitHubAPI: "https://api.github.com",
+		GitHubWeb: "https://github.com",
 		Gateway:   "http://127.0.0.1",
 		StateDir:  "/DATA/AppData/modmanager",
 		ExtDir:    "/var/lib/extensions",
@@ -389,6 +391,11 @@ func (c *Catalog) fetchLatest(ctx context.Context, repo string) (*release, error
 	case resp.StatusCode == http.StatusNotFound:
 		return nil, fmt.Errorf("%s: no such repository or no release", repo)
 	case resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests:
+		// The anonymous API allows 60 calls per hour per address (measured 2026-10-23: used up on a
+		// test day). github.com's release pages do not count against it — ask them before giving up.
+		if rel, werr := c.webLatest(ctx, repo); werr == nil {
+			return rel, nil
+		}
 		return nil, ErrRateLimit
 	case resp.StatusCode != http.StatusOK:
 		return nil, fmt.Errorf("GitHub answered %s for %s", resp.Status, repo)
@@ -398,6 +405,55 @@ func (c *Catalog) fetchLatest(ctx context.Context, repo string) (*release, error
 		return nil, fmt.Errorf("GitHub answer for %s: %w", repo, err)
 	}
 	return &rel, nil
+}
+
+// webLatest reads the newest release from github.com's pages instead of the API:
+// /<repo>/releases/latest redirects to /<repo>/releases/tag/<tag>, and
+// /<repo>/releases/expanded_assets/<tag> lists the assets as download links.
+// Measured 2026-10-23: neither counts against the API's rate limit.
+func (c *Catalog) webLatest(ctx context.Context, repo string) (*release, error) {
+	if c.GitHubWeb == "" {
+		return nil, errors.New("no release pages configured")
+	}
+	noFollow := *c.HTTP
+	noFollow.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.GitHubWeb+"/"+repo+"/releases/latest", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := noFollow.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	_ = resp.Body.Close()
+	loc, err := resp.Location()
+	if err != nil {
+		return nil, fmt.Errorf("%s: release page did not redirect to a tag (%s)", repo, resp.Status)
+	}
+	prefix := "/" + repo + "/releases/tag/"
+	if !strings.HasPrefix(loc.Path, prefix) || len(loc.Path) == len(prefix) {
+		return nil, fmt.Errorf("%s: unexpected release redirect %s", repo, loc.Path)
+	}
+	tag := strings.TrimPrefix(loc.Path, prefix)
+	page, err := c.get(ctx, c.GitHubWeb+"/"+repo+"/releases/expanded_assets/"+url.PathEscape(tag), 2<<20)
+	if err != nil {
+		return nil, err
+	}
+	link := regexp.MustCompile(`href="(/` + regexp.QuoteMeta(repo) + `/releases/download/` + regexp.QuoteMeta(url.PathEscape(tag)) + `/([^"/]+))"`)
+	rel := &release{Tag: tag}
+	seen := map[string]bool{}
+	for _, m := range link.FindAllStringSubmatch(string(page), -1) {
+		name, err := url.PathUnescape(m[2])
+		if err != nil || seen[name] {
+			continue
+		}
+		seen[name] = true
+		rel.Assets = append(rel.Assets, asset{Name: name, URL: c.GitHubWeb + m[1]})
+	}
+	if len(rel.Assets) == 0 {
+		return nil, fmt.Errorf("%s %s: no assets on the release page", repo, tag)
+	}
+	return rel, nil
 }
 
 // archNames are the spellings of this CPU in asset names.
