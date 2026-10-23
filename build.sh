@@ -13,6 +13,8 @@ echo "modmanager v$VERSION linux/$ARCH"
 go vet ./...
 go test -count=1 ./...
 node --check "$WEB/app.js"
+node --check "$WEB/i18n.js"
+node scripts/i18n-check.mjs
 
 mkdir -p raw/usr/bin
 # -buildvcs=false: without it Go stamps the nearest tag and "dirty" (any untracked file) into the binary,
@@ -20,6 +22,6 @@ mkdir -p raw/usr/bin
 CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH" go build -trimpath -buildvcs=false -ldflags="-s -w" -o raw/usr/bin/modmanager ./cmd/modmanager/
 
 # Cache-bust the frontend with the version and keep the shown version in step.
-sed -i -E "s/(styles\.css|app\.js)\?v=[0-9A-Za-z.-]+/\1?v=$VERSION/g; s/(id=\"app-version\">)v[0-9A-Za-z.-]+/\1v$VERSION/" "$WEB/index.html"
+sed -i -E "s/(styles\.css|app\.js|i18n\.js)\?v=[0-9A-Za-z.-]+/\1?v=$VERSION/g; s/(id=\"app-version\">)v[0-9A-Za-z.-]+/\1v$VERSION/" "$WEB/index.html"
 
 sh ../lintux-modkit/sysext/build-sysext.sh modmanager raw "$ARCH" dist "$VERSION"

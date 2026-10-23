@@ -517,11 +517,11 @@ func TestRateLimitServesTheLastGoodAnswer(t *testing.T) {
 	must(t, err)
 	for _, e := range entries {
 		if e.ID == "gh:lintux/cron" {
-			if e.Version != "v0.3.3" || e.Error != "" || !strings.Contains(e.Note, "rate limit") {
+			if e.Version != "v0.3.3" || e.Error != "" || !strings.Contains(e.Note, "rate limit") || e.StaleAt == "" {
 				t.Fatalf("rate-limited entry %+v: want the cached v0.3.3 with a note", e)
 			}
 		}
-		if e.ID == "gh:lintux/zfw" && !strings.Contains(e.Error, "rate limit") {
+		if e.ID == "gh:lintux/zfw" && (!strings.Contains(e.Error, "rate limit") || e.ErrorCode != "rate_limit") {
 			t.Errorf("never fetched before, rate limited: want the error, got %+v", e)
 		}
 	}

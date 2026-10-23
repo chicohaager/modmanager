@@ -40,6 +40,8 @@ jobs:
       - run: gofmt -l . | tee /tmp/fmt && [ ! -s /tmp/fmt ]
       - run: go vet ./...
       - run: node --check raw/usr/share/casaos/www/modules/modmanager/app.js
+      - run: node --check raw/usr/share/casaos/www/modules/modmanager/i18n.js
+      - run: node scripts/i18n-check.mjs
 
   test:
     runs-on: ubuntu-latest

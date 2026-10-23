@@ -266,6 +266,12 @@ func writeCatalogError(w http.ResponseWriter, err error) {
 		httpx.WriteError(w, http.StatusConflict, "protected", err.Error())
 	case errors.Is(err, catalog.ErrCollision):
 		httpx.WriteError(w, http.StatusConflict, "collision", err.Error())
+	case errors.Is(err, catalog.ErrNoRelease):
+		httpx.WriteError(w, http.StatusNotFound, "no_release", err.Error())
+	case errors.Is(err, catalog.ErrUnreachable):
+		httpx.WriteError(w, http.StatusBadGateway, "unreachable", err.Error())
+	case errors.Is(err, catalog.ErrRateLimit):
+		httpx.WriteError(w, http.StatusTooManyRequests, "rate_limit", err.Error())
 	case errors.Is(err, catalog.ErrNotNewer):
 		httpx.WriteError(w, http.StatusConflict, "not_newer", err.Error())
 	case errors.Is(err, catalog.ErrNotInstalled):

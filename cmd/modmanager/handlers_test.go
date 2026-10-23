@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -227,6 +228,9 @@ func TestCatalogErrorsMapToStatusAndCode(t *testing.T) {
 		{catalog.ErrOwn, 409, "own_installer"},
 		{catalog.ErrProtected, 409, "protected"},
 		{catalog.ErrNotInstalled, 409, "not_installed"},
+		{fmt.Errorf("o/r: %w", catalog.ErrNoRelease), 404, "no_release"},
+		{fmt.Errorf("%w: dial tcp", catalog.ErrUnreachable), 502, "unreachable"},
+		{catalog.ErrRateLimit, 429, "rate_limit"},
 		{context.DeadlineExceeded, 502, "failed"},
 	}
 	for _, c := range cases {

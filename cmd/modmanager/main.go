@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	version            = "0.2.5"
+	version            = "0.3.0-dev"
 	routePrefix        = "/modmanager"
 	staticDir          = "/usr/share/casaos/www/modules/modmanager"
 	defaultRuntimePath = "/var/run/casaos"

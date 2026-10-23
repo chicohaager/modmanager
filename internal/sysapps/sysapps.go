@@ -59,6 +59,14 @@ var blocked = map[string]string{
 	"doconverter": "Files and search depend on it",
 }
 
+// blockedCode is the code the UI translates for a module in blocked.
+func blockedCode(name string) string {
+	if blocked[name] != "" {
+		return "dependency"
+	}
+	return ""
+}
+
 // required modules are never listed: ZimaOS needs them (Files is the file
 // manager the shell and other apps link into, e.g. the Backup dialog opens
 // /modules/icewhale_files/; decision 2026-10-21: not offered at all).
@@ -233,13 +241,14 @@ type Data struct {
 
 // App is one built-in app as the UI shows it.
 type App struct {
-	ID      string `json:"id"`
-	Kind    Kind   `json:"kind"`
-	Name    string `json:"name"`
-	Title   string `json:"title"`
-	Icon    string `json:"icon,omitempty"`
-	Hidden  bool   `json:"hidden"`
-	Blocked string `json:"blocked,omitempty"`
+	ID          string `json:"id"`
+	Kind        Kind   `json:"kind"`
+	Name        string `json:"name"`
+	Title       string `json:"title"`
+	Icon        string `json:"icon,omitempty"`
+	Hidden      bool   `json:"hidden"`
+	Blocked     string `json:"blocked,omitempty"`
+	BlockedCode string `json:"blocked_code,omitempty"` // dependency | schema | version — the UI translates by code
 	// Experimental marks a mechanism that writes into an internal ZimaOS store.
 	Experimental bool      `json:"experimental,omitempty"`
 	Services     []Service `json:"services"`
@@ -351,7 +360,7 @@ func (m *Manager) list(ctx context.Context) ([]App, error) {
 		if !validName(name) || required[name] {
 			continue
 		}
-		a := App{ID: "module:" + name, Kind: KindSysext, Name: name, Title: name, Blocked: blocked[name]}
+		a := App{ID: "module:" + name, Kind: KindSysext, Name: name, Title: name, Blocked: blocked[name], BlockedCode: blockedCode(name)}
 		a.Hidden = isDir(filepath.Join(m.P.EtcExt, name))
 		mf, err := readManifest(filepath.Join(m.P.ModulesDir, name+".json"))
 		if err != nil {
@@ -386,7 +395,7 @@ func (m *Manager) list(ctx context.Context) ([]App, error) {
 		if err != nil || !mf.shown() {
 			continue // no tile in the base image (zimanet has no ui.show)
 		}
-		a := App{ID: "module:" + name, Kind: KindBase, Name: name, Title: name, Blocked: blocked[name], Icon: mf.icon()}
+		a := App{ID: "module:" + name, Kind: KindBase, Name: name, Title: name, Blocked: blocked[name], BlockedCode: blockedCode(name), Icon: mf.icon()}
 		if t := mf.title(); t != "" {
 			a.Title = t
 		}
@@ -403,7 +412,7 @@ func (m *Manager) list(ctx context.Context) ([]App, error) {
 	for _, s := range systemApps {
 		a := App{ID: s.id, Kind: KindSystem, Name: s.name, Title: s.title, Experimental: true, Services: []Service{}}
 		if err := m.schemaOK(ctx); err != nil {
-			a.Blocked = err.Error()
+			a.Blocked, a.BlockedCode = err.Error(), "schema"
 		} else {
 			hidden, err := m.denyPresent(ctx, s.resource)
 			if err != nil {
@@ -411,7 +420,7 @@ func (m *Manager) list(ctx context.Context) ([]App, error) {
 			}
 			a.Hidden = hidden
 			if err := m.versionOK(); err != nil && !hidden {
-				a.Blocked = err.Error() // restoring stays possible: it only removes our own tuple
+				a.Blocked, a.BlockedCode = err.Error(), "version" // restoring stays possible: it only removes our own tuple
 			}
 		}
 		apps = append(apps, a)

@@ -48,6 +48,8 @@ For the Lintux modules the catalog shows the **installed version**, read where t
 
 Light theme in the ZFW Firewall style, dark theme following the ZimaOS dark desktop (same wallpaper, translucent cards). Theme: auto (follows the system), light or dark.
 
+Language: English or German. **auto** follows the ZimaOS user's language (`/v1/users/current/custom/system`, e.g. `de_DE`), the menu next to the theme overrides it (kept in the browser). The German texts address the user as „Sie“, like ZimaOS' own German UI. Error messages with a code are translated; for an unexpected error the German frame shows the server's (English) detail. `scripts/i18n-check.mjs` (run by `build.sh` and CI) fails when a text, a key of `index.html` or an error code of the Go backend has no English and German text.
+
 ## Build
 
 ```sh

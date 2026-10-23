@@ -97,7 +97,9 @@ type Entry struct {
 	InstalledVersion string `json:"installed_version,omitempty"`
 	Protected        bool   `json:"protected,omitempty"`
 	Error            string `json:"error,omitempty"`
-	Note             string `json:"note,omitempty"` // e.g. served from cache because of GitHub's rate limit
+	Note             string `json:"note,omitempty"`       // e.g. served from cache because of GitHub's rate limit
+	ErrorCode        string `json:"error_code,omitempty"` // rate_limit | no_release | unreachable | no_image | no_checksum | failed
+	StaleAt          string `json:"stale_at,omitempty"`   // RFC 3339: the release info is this old (rate limit); the UI words it
 }
 
 // Catalog lists and installs modules.
@@ -167,11 +169,30 @@ var (
 	ErrUnknown      = errors.New("unknown catalog entry")
 	ErrNotInstalled = errors.New("module is not installed")
 	ErrRateLimit    = errors.New("GitHub rate limit reached (60 requests per hour without login); try again later")
+	ErrNoRelease    = errors.New("no such repository or no release")
+	ErrUnreachable  = errors.New("GitHub not reachable")
 	ErrCollision    = errors.New("the image would replace files ZimaOS already has; not installed")
 )
 
 var repoPart = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
 var moduleName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+
+// errorCode is the code the UI translates for an entry's error.
+func errorCode(err error) string {
+	switch {
+	case errors.Is(err, ErrRateLimit):
+		return "rate_limit"
+	case errors.Is(err, ErrNoRelease):
+		return "no_release"
+	case errors.Is(err, ErrUnreachable):
+		return "unreachable"
+	case errors.Is(err, ErrNoImage):
+		return "no_image"
+	case errors.Is(err, ErrNoChecksum):
+		return "no_checksum"
+	}
+	return "failed"
+}
 
 // ParseRepo accepts owner/repo, github.com/owner/repo and https URLs below it
 // (…/releases, .git) and returns "owner/repo".
@@ -384,12 +405,12 @@ func (c *Catalog) fetchLatest(ctx context.Context, repo string) (*release, error
 	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("GitHub not reachable: %w", err)
+		return nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	switch {
 	case resp.StatusCode == http.StatusNotFound:
-		return nil, fmt.Errorf("%s: no such repository or no release", repo)
+		return nil, fmt.Errorf("%s: %w", repo, ErrNoRelease)
 	case resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests:
 		// The anonymous API allows 60 calls per hour per address (measured 2026-10-23: used up on a
 		// test day). github.com's release pages do not count against it — ask them before giving up.
@@ -649,17 +670,18 @@ func (c *Catalog) repoEntry(ctx context.Context, repo, source string, p Preset) 
 	}
 	rel, stale, err := c.latest(ctx, repo, false)
 	if err != nil {
-		e.Error = err.Error()
+		e.Error, e.ErrorCode = err.Error(), errorCode(err)
 		return e
 	}
 	if !stale.IsZero() {
 		e.Note = "release info from " + stale.Local().Format("2006-01-02 15:04") + " — GitHub rate limit, newer releases not checked"
+		e.StaleAt = stale.Format(time.RFC3339)
 	}
 	e.Version = rel.Tag
 	name, img, err := c.pick(rel)
 	if err != nil {
 		if p.Installer != "own" {
-			e.Error = err.Error()
+			e.Error, e.ErrorCode = err.Error(), errorCode(err)
 			return e
 		}
 		// An own installer without an image (zfw ships a tarball): the
@@ -675,7 +697,7 @@ func (c *Catalog) repoEntry(ctx context.Context, repo, source string, p Preset) 
 	e.Installed = c.isInstalled(name)
 	want, sumErr := c.checksumFor(ctx, rel, img)
 	if errors.Is(sumErr, ErrNoChecksum) && p.Installer != "own" {
-		e.Error = "the release ships no checksum for " + img.Name + "; it cannot be installed from here"
+		e.Error, e.ErrorCode = "the release ships no checksum for "+img.Name+"; it cannot be installed from here", "no_checksum"
 	}
 	if e.Installed {
 		if v := c.installedVersion(ctx, name, p); v != "" {

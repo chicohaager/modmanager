@@ -340,6 +340,11 @@ func TestBlockedModuleIsRefused(t *testing.T) {
 	if isDir(filepath.Join(h.m.P.EtcExt, "doconverter")) {
 		t.Fatal("doconverter masked anyway")
 	}
+	apps, err := h.m.List(context.Background())
+	must(t, err)
+	if a := byID(t, apps, "module:doconverter"); a.BlockedCode != "dependency" {
+		t.Errorf("doconverter blocked code %q, want dependency (the UI translates by code)", a.BlockedCode)
+	}
 }
 
 func TestPurgeGuards(t *testing.T) {
@@ -451,8 +456,8 @@ func TestSystemTileRefusedOnAnUnverifiedVersionButRestorable(t *testing.T) {
 	}
 	apps, err = h.m.List(ctx)
 	must(t, err)
-	if a := byID(t, apps, "system:backup"); !strings.Contains(a.Blocked, "v1.8.1") {
-		t.Errorf("visible tile on v1.8.1 not blocked: %q", a.Blocked)
+	if a := byID(t, apps, "system:backup"); !strings.Contains(a.Blocked, "v1.8.1") || a.BlockedCode != "version" {
+		t.Errorf("visible tile on v1.8.1 not blocked with code version: %q %q", a.Blocked, a.BlockedCode)
 	}
 	before := len(h.backups())
 	if err := h.m.Hide(ctx, "system:backup"); !errors.Is(err, ErrBlocked) {
