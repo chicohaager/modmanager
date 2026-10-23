@@ -103,6 +103,7 @@ type Catalog struct {
 	StateDir  string // /DATA/AppData/modmanager
 	ExtDir    string // /var/lib/extensions
 	UsrLib    string // /usr/lib — where merged extension-release files live
+	Root      string // / — the host tree an image's files are checked against
 	Arch      string // runtime.GOARCH
 	MaxBytes  int64
 
@@ -141,6 +142,7 @@ func New(run Runner) *Catalog {
 		StateDir:  "/DATA/AppData/modmanager",
 		ExtDir:    "/var/lib/extensions",
 		UsrLib:    "/usr/lib",
+		Root:      "/",
 		Arch:      runtime.GOARCH,
 		MaxBytes:  1 << 30,
 	}
@@ -157,6 +159,7 @@ var (
 	ErrUnknown      = errors.New("unknown catalog entry")
 	ErrNotInstalled = errors.New("module is not installed")
 	ErrRateLimit    = errors.New("GitHub rate limit reached (60 requests per hour without login); try again later")
+	ErrCollision    = errors.New("the image would replace files ZimaOS already has; not installed")
 )
 
 var repoPart = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
@@ -701,6 +704,9 @@ func (c *Catalog) installRepo(ctx context.Context, repo string) error {
 	if err := c.download(ctx, img.URL, dst, want); err != nil {
 		return err
 	}
+	if err := c.checkCollisions(ctx, name, dst); err != nil {
+		return err
+	}
 	if c.isInstalled(name) {
 		if _, err := c.Run(ctx, "zpkg", "remove", name); err != nil {
 			return err
@@ -711,6 +717,63 @@ func (c *Catalog) installRepo(ctx context.Context, repo string) error {
 	}
 	_, err = c.Run(ctx, "systemctl", "daemon-reload")
 	return err
+}
+
+// checkCollisions refuses an image that carries a file the host already has.
+// A sysext overlays /usr, so such a file would replace the host's own for every
+// service — measured on ZimaOS 1.8.0 (2026-10-23): an image with /usr/bin/cmp
+// would have shadowed ZimaOS' BusyBox cmp. On an update the files of the
+// installed version of the same module are in /usr already and do not count.
+// Without a file list there is no check, so that refuses the install too.
+func (c *Catalog) checkCollisions(ctx context.Context, name, img string) error {
+	files, err := c.imageFiles(ctx, img)
+	if err != nil {
+		return err
+	}
+	own := map[string]bool{}
+	if c.isInstalled(name) {
+		old, err := c.imageFiles(ctx, c.installedFile(name))
+		if err != nil {
+			return err
+		}
+		for _, f := range old {
+			own[f] = true
+		}
+	}
+	var hit []string
+	for _, f := range files {
+		if own[f] || strings.HasPrefix(f, "/usr/lib/extension-release.d/") {
+			continue
+		}
+		fi, err := os.Lstat(filepath.Join(c.Root, f))
+		if err != nil || fi.IsDir() {
+			continue
+		}
+		hit = append(hit, f)
+	}
+	if len(hit) == 0 {
+		return nil
+	}
+	if len(hit) > 5 {
+		hit = append(hit[:5], fmt.Sprintf("and %d more", len(hit)-5))
+	}
+	return fmt.Errorf("%w: %s", ErrCollision, strings.Join(hit, ", "))
+}
+
+// imageFiles lists the paths in a squashfs image with the host's unsquashfs
+// (present on ZimaOS 1.8.0), as absolute paths: "squashfs-root/usr/bin/x" -> "/usr/bin/x".
+func (c *Catalog) imageFiles(ctx context.Context, img string) ([]string, error) {
+	out, err := c.Run(ctx, "unsquashfs", "-lc", img)
+	if err != nil {
+		return nil, fmt.Errorf("list the image's files (unsquashfs): %w", err)
+	}
+	var files []string
+	for _, l := range strings.Split(string(out), "\n") {
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(l), "squashfs-root/"); ok && rest != "" {
+			files = append(files, "/"+rest)
+		}
+	}
+	return files, nil
 }
 
 func (c *Catalog) download(ctx context.Context, u, dst, want string) error {

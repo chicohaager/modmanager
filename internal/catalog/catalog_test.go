@@ -95,6 +95,9 @@ type recorder struct {
 	cmds []string
 	// zpkg install copies the image to ExtDir, as the real one does.
 	ext string
+	// lists answers `unsquashfs -lc <file>` by the file's content: the image
+	// strings in these tests stand for squashfs images.
+	lists map[string]string
 }
 
 func (r *recorder) run(_ context.Context, name string, args ...string) ([]byte, error) {
@@ -102,6 +105,13 @@ func (r *recorder) run(_ context.Context, name string, args ...string) ([]byte, 
 	defer r.mu.Unlock()
 	line := name + " " + strings.Join(args, " ")
 	r.cmds = append(r.cmds, line)
+	if name == "unsquashfs" && len(args) == 2 && args[0] == "-lc" {
+		b, err := os.ReadFile(args[1])
+		if err != nil {
+			return nil, fmt.Errorf("unsquashfs: %w", err)
+		}
+		return []byte("squashfs-root\n" + r.lists[string(b)]), nil
+	}
 	if name == "zpkg" && len(args) == 2 && args[0] == "install" && strings.HasSuffix(args[1], ".raw") {
 		b, err := os.ReadFile(args[1])
 		if err != nil {
@@ -137,7 +147,8 @@ func setup(t *testing.T) (*Catalog, *fakeGitHub, *recorder) {
 	}
 	t.Cleanup(func() { Presets = old })
 	c := &Catalog{Run: rec.run, HTTP: g.srv.Client(), GitHubAPI: g.srv.URL, Gateway: g.srv.URL,
-		StateDir: filepath.Join(dir, "state"), ExtDir: rec.ext, UsrLib: filepath.Join(dir, "usrlib"), Arch: "amd64", MaxBytes: 1 << 20}
+		StateDir: filepath.Join(dir, "state"), ExtDir: rec.ext, UsrLib: filepath.Join(dir, "usrlib"), Arch: "amd64", MaxBytes: 1 << 20,
+		Root: filepath.Join(dir, "root")}
 	return c, g, rec
 }
 
@@ -204,7 +215,8 @@ func TestInstallVerifiesRenamesAndInstalls(t *testing.T) {
 	g.tags["lintux/cron"] = "v0.3.3"
 	must(t, os.WriteFile(filepath.Join(rec.ext, "cron.raw"), []byte("squashfs-cron-v1"), 0o644))
 	must(t, c.Install(context.Background(), "gh:lintux/cron"))
-	want := []string{"zpkg remove cron", "zpkg install " + filepath.Join(c.StateDir, "downloads", "cron.raw"), "systemctl daemon-reload"}
+	dl := filepath.Join(c.StateDir, "downloads", "cron.raw")
+	want := []string{"unsquashfs -lc " + dl, "unsquashfs -lc " + filepath.Join(rec.ext, "cron.raw"), "zpkg remove cron", "zpkg install " + dl, "systemctl daemon-reload"}
 	if strings.Join(rec.cmds, "|") != strings.Join(want, "|") {
 		t.Fatalf("commands %v, want %v", rec.cmds, want)
 	}
@@ -220,6 +232,68 @@ func TestInstallVerifiesRenamesAndInstalls(t *testing.T) {
 		if e.ID == "gh:lintux/cron" && (e.State != "current" || e.Version != "v0.3.3") {
 			t.Errorf("after install: %+v, want state current v0.3.3", e)
 		}
+	}
+}
+
+// A sysext overlays /usr: a file at a path the host already has replaces the
+// host's own for every service. Measured on ZimaOS 1.8.0 (2026-10-23): an
+// admintools image carried /usr/bin/cmp, which ZimaOS ships as a BusyBox applet.
+func TestInstallRefusesAnImageThatWouldReplaceHostFiles(t *testing.T) {
+	c, g, rec := setup(t)
+	img := "squashfs-tools-v1"
+	g.releases["lintux/cron"] = map[string]string{"cron-amd64.raw": img, "cron-amd64.raw.sha256": sum(img)}
+	rec.lists = map[string]string{img: "squashfs-root/usr\nsquashfs-root/usr/bin\nsquashfs-root/usr/bin/cmp\nsquashfs-root/usr/bin/newtool\n" +
+		"squashfs-root/usr/lib/extension-release.d/extension-release.cron\n"}
+	must(t, os.MkdirAll(filepath.Join(c.Root, "usr/bin"), 0o755))
+	must(t, os.MkdirAll(filepath.Join(c.Root, "usr/lib/extension-release.d"), 0o755))
+	must(t, os.WriteFile(filepath.Join(c.Root, "usr/bin/cmp"), []byte("busybox"), 0o755))
+	err := c.Install(context.Background(), "gh:lintux/cron")
+	if !errors.Is(err, ErrCollision) || !strings.Contains(err.Error(), "/usr/bin/cmp") {
+		t.Fatalf("collision not refused: %v", err)
+	}
+	if strings.Contains(err.Error(), "newtool") || strings.Contains(err.Error(), "/usr/bin,") {
+		t.Errorf("error names a file that does not collide: %v", err)
+	}
+	if rec.has("zpkg") {
+		t.Fatalf("zpkg ran despite a collision: %v", rec.cmds)
+	}
+}
+
+// An update must not collide with the files of the version it replaces.
+func TestInstallUpdateIgnoresTheInstalledVersionsOwnFiles(t *testing.T) {
+	c, g, rec := setup(t)
+	img := "squashfs-tools-v2"
+	g.releases["lintux/cron"] = map[string]string{"cron-amd64.raw": img, "cron-amd64.raw.sha256": sum(img)}
+	rec.lists = map[string]string{
+		img:                 "squashfs-root/usr/bin/newtool\nsquashfs-root/usr/bin/second\n",
+		"squashfs-tools-v1": "squashfs-root/usr/bin/newtool\n",
+	}
+	must(t, os.WriteFile(filepath.Join(rec.ext, "cron.raw"), []byte("squashfs-tools-v1"), 0o644))
+	must(t, os.MkdirAll(filepath.Join(c.Root, "usr/bin"), 0o755))
+	must(t, os.WriteFile(filepath.Join(c.Root, "usr/bin/newtool"), []byte("from v1, merged"), 0o755))
+	must(t, c.Install(context.Background(), "gh:lintux/cron"))
+	if !rec.has("zpkg install") {
+		t.Fatalf("update not installed: %v", rec.cmds)
+	}
+}
+
+// Without a file list there is no collision check: refuse instead of installing blind.
+func TestInstallRefusesWhenTheImageCannotBeListed(t *testing.T) {
+	c, g, rec := setup(t)
+	img := "squashfs-x"
+	g.releases["lintux/cron"] = map[string]string{"cron-amd64.raw": img, "cron-amd64.raw.sha256": sum(img)}
+	run := c.Run
+	c.Run = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name == "unsquashfs" {
+			return nil, errors.New("exec: unsquashfs: not found")
+		}
+		return run(ctx, name, args...)
+	}
+	if err := c.Install(context.Background(), "gh:lintux/cron"); err == nil || !strings.Contains(err.Error(), "unsquashfs") {
+		t.Fatalf("install without a file list: %v", err)
+	}
+	if rec.has("zpkg") {
+		t.Fatalf("zpkg ran without a collision check: %v", rec.cmds)
 	}
 }
 

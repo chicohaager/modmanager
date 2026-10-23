@@ -224,6 +224,8 @@ func writeCatalogError(w http.ResponseWriter, err error) {
 		httpx.WriteError(w, http.StatusConflict, "own_installer", err.Error())
 	case errors.Is(err, catalog.ErrProtected):
 		httpx.WriteError(w, http.StatusConflict, "protected", err.Error())
+	case errors.Is(err, catalog.ErrCollision):
+		httpx.WriteError(w, http.StatusConflict, "collision", err.Error())
 	case errors.Is(err, catalog.ErrNotInstalled):
 		httpx.WriteError(w, http.StatusConflict, "not_installed", err.Error())
 	default:
