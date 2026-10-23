@@ -4,6 +4,14 @@
 
 Hide or restore the apps ZimaOS ships built in — Photos, PeerDrop, ZVM and the Backup tile — and see every installed module. Nothing is deleted unless you ask for it: **Restore** brings an app back exactly as ZimaOS shipped it.
 
+![Built-in apps: hide or restore Photos, PeerDrop, ZVM and the Backup tile](docs/screenshots/built-in-apps.png)
+
+| Catalog | Installed modules |
+|---|---|
+| ![Catalog: the Lintux modules with installed version, updates and install](docs/screenshots/catalog.png) | ![Installed modules: every module ZimaOS currently has merged](docs/screenshots/installed-modules.png) |
+
+Screenshots: Module Manager 0.2.5 on a ZimaBoard 2 with ZimaOS 1.8.0 (dark theme), 2026-10-23. Changes per release: [CHANGELOG.md](CHANGELOG.md).
+
 ## How each kind of app is hidden
 
 ZimaOS 1.8 has three kinds of built-in tile, and each needs its own way out (measured on ZimaOS 1.8.0):
