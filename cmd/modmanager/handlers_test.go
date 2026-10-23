@@ -157,6 +157,37 @@ func (f *fakeCat) RemoveRepo(repo string) error {
 	return f.err
 }
 
+func (f *fakeCat) Self(_ context.Context, installed string) catalog.SelfStatus {
+	return catalog.SelfStatus{Installed: installed, Latest: "v9.9.9", Update: true}
+}
+func (f *fakeCat) SelfUpdate(_ context.Context, installed string) (string, error) {
+	f.calls = append(f.calls, "self-update "+installed)
+	return "v9.9.9", f.err
+}
+
+func TestSelfRoutes(t *testing.T) {
+	cat := &fakeCat{}
+	mux := newMux(&fakeSvc{}, cat, requireToken)
+	w := do(t, mux, http.MethodGet, "/modmanager/self", "", nil)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"installed":"`+version+`"`) || !strings.Contains(w.Body.String(), `"update":true`) {
+		t.Fatalf("self: %d %s", w.Code, w.Body)
+	}
+	w = do(t, mux, http.MethodPost, "/modmanager/self/update", `{}`, nil)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"v9.9.9"`) || strings.Join(cat.calls, "|") != "self-update "+version {
+		t.Fatalf("update: %d %s calls %v", w.Code, w.Body, cat.calls)
+	}
+	if w := do(t, newMux(&fakeSvc{}, &fakeCat{err: catalog.ErrNotNewer}, requireToken), http.MethodPost, "/modmanager/self/update", `{}`, nil); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), `"not_newer"`) {
+		t.Fatalf("not newer: %d %s", w.Code, w.Body)
+	}
+	for _, p := range []string{"/modmanager/self", "/modmanager/self/update"} {
+		rw := httptest.NewRecorder()
+		mux.ServeHTTP(rw, httptest.NewRequest(http.MethodGet, p, nil))
+		if rw.Code != http.StatusUnauthorized {
+			t.Errorf("%s without token: %d", p, rw.Code)
+		}
+	}
+}
+
 func TestCatalogRoutes(t *testing.T) {
 	cat := &fakeCat{}
 	mux := newMux(&fakeSvc{}, cat, requireToken)

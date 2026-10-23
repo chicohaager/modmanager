@@ -6,6 +6,7 @@ Releases: https://github.com/chicohaager/modmanager/releases. Every release is a
 
 - CI on every push and pull request: gofmt, go vet, `node --check` on the frontend, `go test -race`, govulncheck (advisory), build for amd64 and arm64 (arm64 built, not tested on hardware).
 - README: screenshots of the three tabs; this changelog.
+- Module Manager updates itself: an **Update to v…** button next to the version when a newer release exists; download, checksum and collision check as for any catalog module, the swap runs in a transient unit and rolls back to the previous image if the install fails (tested on ZimaOS 1.8.0: 0.2.4 → 0.2.5 in 8 s).
 - Catalog: when GitHub's API rate limit is reached (60 calls per hour without login), the newest release is read from github.com's release pages instead — they do not count against that limit (measured 2026-10-23). Only if those fail too, the last good answer (or the rate-limit message) is shown.
 
 ## 0.2.5 — 2026-10-23
