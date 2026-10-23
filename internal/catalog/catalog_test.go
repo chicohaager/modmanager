@@ -26,7 +26,9 @@ type fakeGitHub struct {
 	tags     map[string]string
 	store    string
 	gotAuth  string
-	limited  bool              // answer the release API with 403 like GitHub's rate limit
+	limited  bool // answer the release API with 403 like GitHub's rate limit
+	webOff   bool // the github.com release pages are not reachable either
+	webCalls int
 	health   map[string]string // path -> version answered as {"version": …}
 	apiCalls int
 	mu       sync.Mutex
@@ -73,6 +75,30 @@ func (g *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"tag_name": g.tags[repo], "assets": list})
 		return
+	}
+	// github.com release pages (no API): /<o>/<r>/releases/latest redirects to the tag,
+	// /<o>/<r>/releases/expanded_assets/<tag> lists the download links, /<o>/<r>/releases/download/<tag>/<name> serves them.
+	if parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/"), "/", 5); len(parts) >= 4 && parts[2] == "releases" && !g.webOff {
+		repo := parts[0] + "/" + parts[1]
+		assets, ok := g.releases[repo]
+		switch {
+		case !ok:
+		case parts[3] == "latest" && len(parts) == 4:
+			g.webCalls++
+			http.Redirect(w, r, "/"+repo+"/releases/tag/"+g.tags[repo], http.StatusFound)
+			return
+		case parts[3] == "expanded_assets" && len(parts) == 5 && parts[4] == g.tags[repo]:
+			g.webCalls++
+			for n := range assets {
+				_, _ = fmt.Fprintf(w, `<a href="/%s/releases/download/%s/%s" rel="nofollow">%s</a>`+"\n", repo, g.tags[repo], n, n)
+			}
+			return
+		case parts[3] == "download" && len(parts) == 5:
+			if c, ok := assets[strings.TrimPrefix(parts[4], g.tags[repo]+"/")]; ok {
+				_, _ = w.Write([]byte(c))
+				return
+			}
+		}
 	}
 	if strings.HasPrefix(r.URL.Path, "/dl/") {
 		rest := strings.TrimPrefix(r.URL.Path, "/dl/")
@@ -146,7 +172,7 @@ func setup(t *testing.T) (*Catalog, *fakeGitHub, *recorder) {
 		{Repo: "lintux/zfw", Title: "ZFW", Installer: "own", Command: "sudo bash install.sh --install zfw", HealthPath: "/v2/zfw/api/health"},
 	}
 	t.Cleanup(func() { Presets = old })
-	c := &Catalog{Run: rec.run, HTTP: g.srv.Client(), GitHubAPI: g.srv.URL, Gateway: g.srv.URL,
+	c := &Catalog{Run: rec.run, HTTP: g.srv.Client(), GitHubAPI: g.srv.URL, GitHubWeb: g.srv.URL, Gateway: g.srv.URL,
 		StateDir: filepath.Join(dir, "state"), ExtDir: rec.ext, UsrLib: filepath.Join(dir, "usrlib"), Arch: "amd64", MaxBytes: 1 << 20,
 		Root: filepath.Join(dir, "root")}
 	return c, g, rec
@@ -481,6 +507,7 @@ func TestRateLimitServesTheLastGoodAnswer(t *testing.T) {
 		t.Fatal(err)
 	}
 	g.limited = true
+	g.webOff = true // this test is about the stale answer: the release pages are down too
 	c.cache = nil
 	for k, v := range c.good { // pretend the good answer is older than the TTL
 		v.At = v.At.Add(-time.Hour)
@@ -497,6 +524,30 @@ func TestRateLimitServesTheLastGoodAnswer(t *testing.T) {
 		if e.ID == "gh:lintux/zfw" && !strings.Contains(e.Error, "rate limit") {
 			t.Errorf("never fetched before, rate limited: want the error, got %+v", e)
 		}
+	}
+}
+
+// Measured 2026-10-23 on ZimaOS 1.8.0: the catalog showed "rate limit" on two cards, 0 of 60 anonymous
+// API calls left. github.com's release pages (latest redirect, expanded_assets, download links) do not
+// count against that limit (core remaining 20 before and after). A never-fetched repository must still list.
+func TestRateLimitFallsBackToTheReleasePages(t *testing.T) {
+	c, g, _ := setup(t)
+	g.releases["lintux/cron"] = map[string]string{"cron-amd64.raw": "x", "cron-amd64.raw.sha256": sum("x"), "cron-arm64.raw": "y"}
+	g.tags["lintux/cron"] = "v0.3.3"
+	g.limited = true
+	entries, _, err := c.List(context.Background())
+	must(t, err)
+	var cron *Entry
+	for i := range entries {
+		if entries[i].ID == "gh:lintux/cron" {
+			cron = &entries[i]
+		}
+	}
+	if cron == nil || cron.Version != "v0.3.3" || cron.Error != "" {
+		t.Fatalf("rate limited, never fetched: want v0.3.3 from the release pages, got %+v", cron)
+	}
+	if g.webCalls == 0 {
+		t.Fatal("the release pages were never asked")
 	}
 }
 
