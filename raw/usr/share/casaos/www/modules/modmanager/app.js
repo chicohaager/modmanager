@@ -1,4 +1,5 @@
 'use strict';
+// Texts come from i18n.js (t, th, applyStaticTexts, initLang), loaded before this file.
 
 // The gateway forwards module calls with the path intact; the backend
 // listens under /modmanager.
@@ -63,15 +64,32 @@ function setStatus(msg, kind) {
   el.className = kind || '';
 }
 
+// detail: what the server said after the part the code already names (the file list of a
+// collision, the cause of a failure) — technical detail stays in the server's words.
+function detailOf(code, message) {
+  const m = String(message || '');
+  if (code === 'collision') return m.split('not installed: ').pop();
+  const i = m.indexOf(': ');
+  return i >= 0 && code !== 'failed' && code !== 'internal' ? m.slice(i + 2) : m;
+}
+
+// A text for an error code of the API or of a catalog entry; unknown codes keep the server's message.
+function codeText(code, message) {
+  const key = `code.${code}`;
+  if (code && TEXTS.en[key]) return t(key, { detail: detailOf(code, message) });
+  return message || code;
+}
+
 function describe(err) {
-  if (err instanceof ApiError && err.status === 401) return 'Session expired — reload the ZimaOS page and sign in again.';
+  if (err instanceof ApiError && err.status === 401) return t('err.session');
+  if (err instanceof ApiError) return codeText(err.code, err.message);
   return err.message || String(err);
 }
 
-// ---------- theme ----------
+// ---------- theme and language ----------
 
-function applyTheme(t) {
-  if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+function applyTheme(th_) {
+  if (th_ === 'light' || th_ === 'dark') document.documentElement.setAttribute('data-theme', th_);
   else document.documentElement.removeAttribute('data-theme');
 }
 
@@ -85,9 +103,23 @@ function initTheme() {
   });
 }
 
+function initLangSelect() {
+  const sel = $('#lang-select');
+  const stored = safeGet('modmanager.lang');
+  sel.value = stored === 'en' || stored === 'de' ? stored : 'auto';
+  sel.addEventListener('change', async () => {
+    safeSet('modmanager.lang', sel.value);
+    await initLang();
+    applyStaticTexts();
+    renderApps();
+    renderCatalog();
+    loadModules().catch(() => {});
+    if (selfTarget) $('#self-update-btn').textContent = t('self.update', { v: selfTarget });
+  });
+}
+
 // ---------- built-in apps ----------
 
-const KIND_LABEL = { sysext: 'system extension', base: 'system image', system: 'system tile' };
 let apps = [];
 let busy = false;
 
@@ -106,31 +138,37 @@ function iconHTML(a) {
 }
 
 function stateHTML(a) {
-  if (a.blocked && !a.hidden) return '<span class="pill pill-warn">Locked</span>';
-  return a.hidden ? '<span class="pill pill-off">Hidden</span>' : '<span class="pill pill-ok">Visible</span>';
+  if (a.blocked && !a.hidden) return `<span class="pill pill-warn">${esc(t('pill.locked'))}</span>`;
+  return a.hidden ? `<span class="pill pill-off">${esc(t('pill.hidden'))}</span>` : `<span class="pill pill-ok">${esc(t('pill.visible'))}</span>`;
+}
+
+// The reason an app cannot be hidden: by code, the server's words as the tooltip.
+function blockedText(a) {
+  return a.blocked_code && TEXTS.en[`blocked.${a.blocked_code}`] ? t(`blocked.${a.blocked_code}`) : a.blocked;
 }
 
 function cardHTML(a) {
   const svc = a.services.map((s) => {
     const cls = s.masked ? 'pill-off' : s.active === 'active' ? 'pill-ok' : 'pill-off';
-    const txt = s.masked ? 'masked' : (s.active || 'unknown');
+    const state = s.active && TEXTS.en[`svc.${s.active}`] ? t(`svc.${s.active}`) : s.active; // systemd's word when unknown
+    const txt = s.masked ? t('svc.masked') : (state || t('svc.unknown'));
     return `<span class="pill ${cls}" title="${esc(s.unit)}">${esc(s.unit.replace(/\.service$/, ''))}: ${esc(txt)}</span>`;
   }).join('');
   const data = a.data && a.data.exists
-    ? `<span class="pill pill-accent" title="${esc(a.data.path)}">data ${esc(fmtBytes(a.data.bytes))}</span>` : '';
+    ? `<span class="pill pill-accent" title="${esc(a.data.path)}">${esc(t('pill.data', { size: fmtBytes(a.data.bytes) }))}</span>` : '';
   const exp = a.experimental
-    ? '<span class="pill pill-warn" title="Writes into the ZimaOS user database (internal, may change with any ZimaOS update). A backup is taken before every change.">experimental</span>' : '';
-  const blocked = a.blocked ? `<div class="app-sub">${esc(a.blocked)}</div>` : '';
+    ? `<span class="pill pill-warn" title="${esc(t('pill.experimental.title'))}">${esc(t('pill.experimental'))}</span>` : '';
+  const blocked = a.blocked ? `<div class="app-sub" title="${esc(a.blocked)}">${esc(blockedText(a))}</div>` : '';
   let actions;
   if (a.hidden) {
-    actions = `<button class="btn-primary btn-small" data-act="restore" data-id="${esc(a.id)}">Restore</button>`;
-    if (a.data && a.data.exists) actions += `<button class="btn-danger btn-small" data-act="purge" data-id="${esc(a.id)}">Delete data</button>`;
+    actions = `<button class="btn-primary btn-small" data-act="restore" data-id="${esc(a.id)}">${esc(t('btn.restore'))}</button>`;
+    if (a.data && a.data.exists) actions += `<button class="btn-danger btn-small" data-act="purge" data-id="${esc(a.id)}">${esc(t('btn.purge'))}</button>`;
   } else {
-    actions = `<button class="btn-small" data-act="hide" data-id="${esc(a.id)}"${a.blocked ? ' disabled' : ''}>Hide</button>`;
+    actions = `<button class="btn-small" data-act="hide" data-id="${esc(a.id)}"${a.blocked ? ' disabled' : ''}>${esc(t('btn.hide'))}</button>`;
   }
   return `<div class="card${a.hidden ? ' is-hidden' : ''}">
     <div class="app-head">${iconHTML(a)}
-      <div class="app-text"><div class="app-title">${esc(a.title)}</div><div class="app-sub mono">${esc(a.name)} · ${esc(KIND_LABEL[a.kind] || a.kind)}</div></div>
+      <div class="app-text"><div class="app-title">${esc(a.title)}</div><div class="app-sub mono">${esc(a.name)} · ${esc(TEXTS.en[`kind.${a.kind}`] ? t(`kind.${a.kind}`) : a.kind)}</div></div>
       ${stateHTML(a)}
     </div>
     ${blocked}
@@ -142,7 +180,7 @@ function cardHTML(a) {
 function renderApps() {
   const el = $('#apps');
   if (!apps.length) {
-    el.innerHTML = '<div class="loading">No built-in apps found.</div>';
+    el.innerHTML = `<div class="loading">${esc(t('apps.none'))}</div>`;
     return;
   }
   el.innerHTML = apps.map(cardHTML).join('');
@@ -170,12 +208,11 @@ async function act(action, id, confirm) {
   const name = a ? a.title : id;
   busy = true;
   renderApps();
-  setStatus(`${action === 'hide' ? 'Hiding' : action === 'restore' ? 'Restoring' : 'Deleting data of'} ${name} — ZimaOS re-merges its system extensions, this takes a few seconds…`);
+  setStatus(t(`act.${action}`, { name }));
   try {
     const data = await api(`${API_BASE}/apps/${action}`, { method: 'POST', body: { id, confirm } });
     apps = data.apps || [];
-    const done = { hide: 'hidden', restore: 'restored', purge: 'data deleted' }[action];
-    setStatus(`${name}: ${done}. Reload the ZimaOS dashboard to see the change.`, 'ok');
+    setStatus(t(`done.${action}`, { name }), 'ok');
   } catch (err) {
     setStatus(`${name}: ${describe(err)}`, 'err');
     try { await loadApps(); } catch { /* keep the message above */ }
@@ -193,7 +230,7 @@ function openPurge(id) {
   const a = apps.find((x) => x.id === id);
   if (!a || !a.data) return;
   purgeID = id;
-  $('#purge-text').textContent = `This permanently deletes ${a.data.path} (${fmtBytes(a.data.bytes)}): the app's index, settings and models. Your own files elsewhere are not touched; the deletion is refused if a photo or video is found inside.`;
+  $('#purge-text').textContent = t('purge.text', { path: a.data.path, size: fmtBytes(a.data.bytes) });
   $('#purge-name').textContent = a.name;
   $('#purge-input').value = '';
   $('#purge-ok').disabled = true;
@@ -215,13 +252,14 @@ async function loadModules() {
   const list = Array.isArray(data.data) ? data.data : [];
   list.sort((x, y) => String(x.name).localeCompare(String(y.name)));
   const rows = list.map((m) => {
-    const t = (m.ui && m.ui.title && (m.ui.title.en_us || Object.values(m.ui.title)[0])) || '';
+    const titles = (m.ui && m.ui.title) || {};
+    const ti = titles[LANG === 'de' ? 'de_de' : 'en_us'] || titles.en_us || Object.values(titles)[0] || '';
     const svcs = (m.services || []).map((s) => esc(s.name)).join(', ') || '<span class="muted">—</span>';
-    const when = m.created_at ? new Date(m.created_at * 1000).toLocaleDateString() : '—';
-    const src = BUILTIN.has(m.name) ? '<span class="pill pill-off">ZimaOS</span>' : '<span class="pill pill-accent">added</span>';
-    return `<tr><td class="mono">${esc(m.name)}</td><td>${esc(t)}</td><td class="mono">${svcs}</td><td>${esc(when)}</td><td>${src}</td></tr>`;
+    const when = m.created_at ? new Date(m.created_at * 1000).toLocaleDateString(LANG === 'de' ? 'de-DE' : undefined) : '—';
+    const src = BUILTIN.has(m.name) ? '<span class="pill pill-off">ZimaOS</span>' : `<span class="pill pill-accent">${esc(t('mods.added'))}</span>`;
+    return `<tr><td class="mono">${esc(m.name)}</td><td>${esc(ti)}</td><td class="mono">${svcs}</td><td>${esc(when)}</td><td>${src}</td></tr>`;
   });
-  $('#mods').innerHTML = rows.join('') || '<tr><td colspan="5" class="loading">No modules reported.</td></tr>';
+  $('#mods').innerHTML = rows.join('') || `<tr><td colspan="5" class="loading">${esc(t('mods.none'))}</td></tr>`;
 }
 
 // ---------- catalog ----------
@@ -229,54 +267,64 @@ async function loadModules() {
 let catalog = { entries: [], repos: [] };
 let armed = null; // name whose uninstall waits for the second click
 
+function pill(cls, text, title) {
+  return `<span class="pill ${cls}"${title ? ` title="${esc(title)}"` : ''}>${esc(text)}</span>`;
+}
+
 function stateBadge(e) {
-  if (!e.installed) return e.installer === 'own' ? '<span class="pill pill-off">Own installer</span>' : '<span class="pill pill-off">Not installed</span>';
+  if (!e.installed) return pill('pill-off', e.installer === 'own' ? t('badge.own') : t('badge.notInstalled'));
   const iv = e.installed_version;
-  const rel = esc(e.version || 'release');
+  const rel = e.version || t('word.release');
   if (iv) {
     // The version comes from the running module and is compared semver-style.
-    if (e.state === 'current') return `<span class="pill pill-ok">Up to date · ${esc(iv)}</span>`;
-    if (e.state === 'update') return `<span class="pill pill-warn">Update ${esc(iv)} → ${rel}</span>`;
-    if (e.state === 'newer') return `<span class="pill pill-accent" title="A development build newer than the latest release.">${esc(iv)} · newer than ${rel}</span>`;
+    if (e.state === 'current') return pill('pill-ok', t('badge.current', { v: iv }));
+    if (e.state === 'update') return pill('pill-warn', t('badge.update', { iv, rel }));
+    if (e.state === 'newer') return pill('pill-accent', t('badge.newer', { iv, rel }), t('badge.newer.title'));
   }
-  if (e.state === 'current') return '<span class="pill pill-ok">Up to date</span>';
+  if (e.state === 'current') return pill('pill-ok', t('badge.currentPlain'));
   // "update" only says the installed image is not byte-identical with the
   // latest release — it may be older or a newer development build.
-  if (e.state === 'update') return `<span class="pill pill-warn" title="The installed image is not the release image; it may be older or a development build.">Differs from ${esc(e.version || 'release')}</span>`;
-  return '<span class="pill pill-ok">Installed</span>';
+  if (e.state === 'update') return pill('pill-warn', t('badge.differs', { rel }), t('badge.differs.title'));
+  return pill('pill-ok', t('badge.installed'));
+}
+
+function entryNote(e) {
+  if (e.stale_at) return t('cat.stale', { time: new Date(e.stale_at).toLocaleString(LANG === 'de' ? 'de-DE' : undefined) });
+  return e.note || '';
 }
 
 function catalogCardHTML(e) {
   const sub = [e.name, e.version].filter(Boolean).map(esc).join(' · ');
   const repoLink = e.repo ? `<a class="app-sub mono" href="https://github.com/${esc(e.repo)}" target="_blank" rel="noopener noreferrer">${esc(e.repo)}</a>` : '';
-  const err = e.error ? `<div class="app-err">${esc(e.error)}</div>` : '';
-  const note = e.note ? `<div class="app-sub">${esc(e.note)}</div>` : '';
+  const err = e.error ? `<div class="app-err" title="${esc(e.error)}">${esc(codeText(e.error_code, e.error))}</div>` : '';
+  const noteText = entryNote(e);
+  const note = noteText ? `<div class="app-sub">${esc(noteText)}</div>` : '';
   let body = '';
   let actions = '';
   if (e.installer === 'own' && e.command) {
-    body = `<div class="root-note"><span class="pill pill-root">root</span> Must run as root: open the ZimaOS terminal, log in with your ZimaOS user and paste the command — <code>sudo</code> asks for your ZimaOS password.</div>
-      <div class="cmd"><code>${esc(e.command)}</code><button class="btn-small" data-copy="${esc(e.command)}">Copy</button></div>
-      <div class="app-sub">Needs its own installer (it sets up more than the image).</div>`;
+    body = `<div class="root-note">${t('card.rootNote')}</div>
+      <div class="cmd"><code>${esc(e.command)}</code><button class="btn-small" data-copy="${esc(e.command)}">${esc(t('btn.copy'))}</button></div>
+      <div class="app-sub">${esc(t('card.ownInstaller'))}</div>`;
   } else if (e.installer === 'zpkg') {
     if (!e.error && !e.protected) {
-      const rel = esc(e.version || 'release');
-      if (!e.installed) actions += `<button class="btn-primary btn-small" data-cat="install" data-id="${esc(e.id)}">Install</button>`;
-      else if (e.state === 'update') actions += `<button class="btn-primary btn-small" data-cat="install" data-id="${esc(e.id)}">${e.installed_version ? 'Update to' : 'Install'} ${rel}</button>`;
+      const rel = e.version || t('word.release');
+      if (!e.installed) actions += `<button class="btn-primary btn-small" data-cat="install" data-id="${esc(e.id)}">${esc(t('btn.install'))}</button>`;
+      else if (e.state === 'update') actions += `<button class="btn-primary btn-small" data-cat="install" data-id="${esc(e.id)}">${esc(e.installed_version ? t('btn.updateTo', { rel }) : t('btn.installRel', { rel }))}</button>`;
       // "newer": no button — it would downgrade a development build to the release.
-      else if (e.state !== 'newer') actions += `<button class="btn-small" data-cat="install" data-id="${esc(e.id)}">Reinstall</button>`;
+      else if (e.state !== 'newer') actions += `<button class="btn-small" data-cat="install" data-id="${esc(e.id)}">${esc(t('btn.reinstall'))}</button>`;
     }
     if (e.installed && !e.protected) {
-      const label = armed === e.name ? 'Click again to uninstall' : 'Uninstall';
-      actions += `<button class="btn-danger btn-small" data-cat="uninstall" data-name="${esc(e.name)}">${label}</button>`;
+      const label = armed === e.name ? t('btn.uninstallAgain') : t('btn.uninstall');
+      actions += `<button class="btn-danger btn-small" data-cat="uninstall" data-name="${esc(e.name)}">${esc(label)}</button>`;
     }
   }
-  if (e.source === 'repo') actions += `<button class="btn-small" data-cat="remove-repo" data-repo="${esc(e.repo)}" title="Remove from this list (an installed module stays installed)">Remove from list</button>`;
+  if (e.source === 'repo') actions += `<button class="btn-small" data-cat="remove-repo" data-repo="${esc(e.repo)}" title="${esc(t('btn.removeFromList.title'))}">${esc(t('btn.removeFromList'))}</button>`;
   return `<div class="card">
     <div class="app-head"><span class="app-icon">${esc((e.title || e.name || '?').charAt(0).toUpperCase())}</span>
       <div class="app-text"><div class="app-title">${esc(e.title || e.name)}</div><div class="app-sub mono">${sub}</div>${repoLink}</div>
-      <div class="app-badges">${e.source === 'repo' ? '<span class="pill pill-warn">third-party</span>' : ''}${e.error && !e.installed ? '' : stateBadge(e)}</div>
+      <div class="app-badges">${e.source === 'repo' ? pill('pill-warn', t('badge.thirdParty')) : ''}${e.error && !e.installed ? '' : stateBadge(e)}</div>
     </div>
-    ${e.source === 'repo' ? '<div class="trust-note">Third-party repository you added: the checksum only proves the download is intact, not that the author is trustworthy. The module would run as root.</div>' : ''}
+    ${e.source === 'repo' ? `<div class="trust-note">${esc(t('card.trust'))}</div>` : ''}
     ${note}${err}${body}
     <div class="app-actions">${actions}</div>
   </div>`;
@@ -284,7 +332,7 @@ function catalogCardHTML(e) {
 
 function renderCatalog() {
   // Presets and repositories the user added share one section.
-  $('#cat-github').innerHTML = catalog.entries.map(catalogCardHTML).join('') || '<div class="empty">No GitHub modules.</div>';
+  $('#cat-github').innerHTML = catalog.entries.map(catalogCardHTML).join('') || `<div class="empty">${esc(t('cat.none'))}</div>`;
   document.querySelectorAll('#tab-catalog button[data-cat], #repo-form button').forEach((b) => { b.disabled = busy; });
 }
 
@@ -301,7 +349,7 @@ async function catalogAction(path, body, what) {
   try {
     const data = await api(`${API_BASE}/catalog/${path}`, { method: 'POST', body });
     catalog = { entries: data.entries || [], repos: data.repos || [] };
-    setStatus(`${what}: done.`, 'ok');
+    setStatus(t('cat.done', { what }), 'ok');
     loadModules().catch(() => {});
     return true;
   } catch (err) {
@@ -324,7 +372,7 @@ async function loadSelf() {
   const b = $('#self-update-btn');
   selfTarget = s.update ? s.latest : null;
   b.hidden = !selfTarget;
-  if (selfTarget) b.textContent = `Update to ${selfTarget}`;
+  if (selfTarget) b.textContent = t('self.update', { v: selfTarget });
 }
 
 // The backend downloads and checks the release, then a transient unit swaps the module:
@@ -334,16 +382,16 @@ async function selfUpdate() {
   if (!selfTarget) return;
   if (!selfArmed) {
     selfArmed = true;
-    b.textContent = `Click again: update to ${selfTarget}`;
-    setTimeout(() => { selfArmed = false; if (selfTarget) b.textContent = `Update to ${selfTarget}`; }, 4000);
+    b.textContent = t('self.again', { v: selfTarget });
+    setTimeout(() => { selfArmed = false; if (selfTarget) b.textContent = t('self.update', { v: selfTarget }); }, 4000);
     return;
   }
   selfArmed = false;
   b.disabled = true;
-  setStatus(`Downloading and checking ${selfTarget}…`);
+  setStatus(t('self.checking', { v: selfTarget }));
   try {
     const r = await api(`${API_BASE}/self/update`, { method: 'POST', body: {} });
-    setStatus(`Updating to ${r.to} — Module Manager restarts; this page reloads when it answers again…`);
+    setStatus(t('self.updating', { v: r.to }));
     const want = r.to.replace(/^v/, '');
     let away = false;
     const until = Date.now() + 180000;
@@ -353,11 +401,11 @@ async function selfUpdate() {
       try { h = await (await fetch(`${API_BASE}/health`, { cache: 'no-store' })).json(); } catch { away = true; continue; }
       if (h && h.version === want) { location.reload(); return; }
       if (h && away) {
-        setStatus(`The update to ${r.to} failed; ${h.version} is installed again. Log: /DATA/AppData/modmanager/self-update/log`, 'err');
+        setStatus(t('self.failed', { v: r.to, old: h.version }), 'err');
         return;
       }
     }
-    setStatus(`No answer from Module Manager after 3 minutes. Log: /DATA/AppData/modmanager/self-update/log`, 'err');
+    setStatus(t('self.timeout'), 'err');
   } catch (e) {
     setStatus(describe(e), 'err');
   } finally {
@@ -368,15 +416,18 @@ async function selfUpdate() {
 // ---------- wiring ----------
 
 async function refreshAll() {
-  setStatus('Loading…');
+  setStatus(t('loading'));
   const results = await Promise.allSettled([loadApps(), loadModules(), loadCatalog()]);
   const failed = results.filter((r) => r.status === 'rejected');
   if (failed.length) setStatus(failed.map((r) => describe(r.reason)).join(' · '), 'err');
   else setStatus('');
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   initTheme();
+  await initLang();
+  applyStaticTexts();
+  initLangSelect();
   document.querySelectorAll('.tab-btn').forEach((b) => b.addEventListener('click', () => {
     document.querySelectorAll('.tab-btn').forEach((x) => x.classList.toggle('active', x === b));
     document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === `tab-${b.dataset.tab}`));
@@ -406,12 +457,12 @@ document.addEventListener('DOMContentLoaded', () => {
     e.preventDefault();
     const repo = $('#repo-input').value.trim();
     if (!repo) return;
-    if (await catalogAction('repos', { repo }, `Adding ${repo}`)) $('#repo-input').value = '';
+    if (await catalogAction('repos', { repo }, t('what.adding', { repo }))) $('#repo-input').value = '';
   });
   $('#tab-catalog').addEventListener('click', async (e) => {
     const copy = e.target.closest('button[data-copy]');
     if (copy) {
-      try { await navigator.clipboard.writeText(copy.dataset.copy); setStatus('Command copied.', 'ok'); } catch { setStatus('Copy failed — select the command and copy it by hand.', 'err'); }
+      try { await navigator.clipboard.writeText(copy.dataset.copy); setStatus(t('copy.ok'), 'ok'); } catch { setStatus(t('copy.fail'), 'err'); }
       return;
     }
     const b = e.target.closest('button[data-cat]');
@@ -419,7 +470,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const entry = catalog.entries.find((x) => x.id === b.dataset.id || x.name === b.dataset.name);
     const title = entry ? (entry.title || entry.name) : (b.dataset.repo || '');
     if (b.dataset.cat === 'install') {
-      catalogAction('install', { id: b.dataset.id }, `Installing ${title} (download, checksum, zpkg)`);
+      catalogAction('install', { id: b.dataset.id }, t('what.installing', { title }));
     } else if (b.dataset.cat === 'uninstall') {
       if (armed !== b.dataset.name) {
         armed = b.dataset.name;
@@ -427,9 +478,9 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeout(() => { if (armed === b.dataset.name) { armed = null; renderCatalog(); } }, 5000);
         return;
       }
-      catalogAction('uninstall', { name: b.dataset.name }, `Uninstalling ${title}`);
+      catalogAction('uninstall', { name: b.dataset.name }, t('what.uninstalling', { title }));
     } else if (b.dataset.cat === 'remove-repo') {
-      catalogAction('repos/remove', { repo: b.dataset.repo }, `Removing ${b.dataset.repo} from the list`);
+      catalogAction('repos/remove', { repo: b.dataset.repo }, t('what.removing', { repo: b.dataset.repo }));
     }
   });
   refreshAll();
