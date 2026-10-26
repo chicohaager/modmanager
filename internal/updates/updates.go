@@ -4,33 +4,30 @@
 // installed. Without it an update was only visible inside the Module
 // Manager's catalog (measured 2026-10-26: no background check, no card).
 //
-// Cards ("You should know", YSK) go through the ZimaOS message bus, as in
-// Sync & Backup (zima-backup internal/dashboard) and ZFW. Measured on 1.8.0
-// (KB §75): a card reaches only the dashboards open at that moment and is
-// not stored, so it is re-sent every minute while updates wait; a footer
-// button can only open a URL ("casaos-ui:open_files"); the body is cut
-// after four lines (156 characters were visible at 1400 px).
+// The card goes through the ZimaOS message bus (lintux-modkit ysk, shared
+// with Sync & Backup). Measured on 1.8.0 (KB §75): a card reaches only the
+// dashboards open at that moment and is not stored, so it is re-sent every
+// minute while updates wait; a footer button can only open a URL; the body
+// is cut after four lines (156 characters were visible at 1400 px).
 package updates
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/chicohaager/lintux-modkit/ysk"
 	"github.com/chicohaager/modmanager/internal/catalog"
 )
 
 // DefaultBusURLFile is where ZimaOS records the message bus address.
-const DefaultBusURLFile = "/var/run/casaos/message-bus.url"
+const DefaultBusURLFile = ysk.DefaultBusURLFile
 
 // CardID is stable, so a re-send replaces the card instead of stacking one.
 const CardID = "modmanager:updates"
@@ -107,48 +104,11 @@ func Text(lang string, list []Update) string {
 	return string(s)
 }
 
-type card struct {
-	ID         string  `json:"id"`
-	CardType   string  `json:"cardType"`
-	RenderType string  `json:"renderType"`
-	Content    content `json:"content"`
-}
-
-type content struct {
-	TitleIcon        string     `json:"titleIcon"`
-	TitleText        string     `json:"titleText"`
-	BodyIconWithText *iconText  `json:"bodyIconWithText,omitempty"`
-	FooterActions    []footerAc `json:"footerActions,omitempty"`
-}
-
-type iconText struct {
-	Icon        string `json:"icon"`
-	Description string `json:"description"`
-}
-
-type footerAc struct {
-	Side       string `json:"side"`
-	Style      string `json:"style"`
-	Text       string `json:"text"`
-	MessageBus busAct `json:"messageBus"`
-}
-
-type busAct struct {
-	Key     string `json:"key"`
-	Payload string `json:"payload"`
-}
+// card is the YSK card (lintux-modkit ysk).
+type card = ysk.Card
 
 func build(lang string, list []Update) card {
-	open, _ := json.Marshal(map[string]string{"url": "modules/modmanager/index.html#catalog"})
-	return card{
-		ID: CardID, CardType: "long-notice", RenderType: "icon-text-notice",
-		Content: content{
-			TitleIcon: icon, TitleText: "Module Manager",
-			BodyIconWithText: &iconText{Icon: icon, Description: Text(lang, list)},
-			FooterActions: []footerAc{{Side: "right", Style: "primary", Text: wordsFor(lang).open,
-				MessageBus: busAct{Key: "casaos-ui:open_files", Payload: string(open)}}},
-		},
-	}
+	return ysk.NewCard(CardID, "Module Manager", icon, Text(lang, list), wordsFor(lang).open, "modules/modmanager/index.html#catalog")
 }
 
 // Notifier posts and withdraws the card. The zero BusURLFile disables it.
@@ -157,62 +117,16 @@ type Notifier struct {
 	Client     *http.Client
 }
 
-func (n Notifier) busURL() (string, error) {
-	b, err := os.ReadFile(n.BusURLFile)
-	if err != nil {
-		return "", err
-	}
-	u, err := url.Parse(strings.TrimSpace(string(b)))
-	if err != nil || u.Scheme != "http" || u.Hostname() != "127.0.0.1" {
-		// the bus is a local service; never follow the file anywhere else
-		return "", fmt.Errorf("message bus url %q is not a loopback http url", strings.TrimSpace(string(b)))
-	}
-	return strings.TrimRight(u.String(), "/"), nil
-}
-
-func (n Notifier) publish(ctx context.Context, event string, props map[string]string) error {
-	if n.BusURLFile == "" {
-		return nil
-	}
-	base, err := n.busURL()
-	if err != nil {
-		return err
-	}
-	body, _ := json.Marshal(props)
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/v2/message_bus/event/ysk/"+url.PathEscape(event), bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	c := n.Client
-	if c == nil {
-		c = http.DefaultClient
-	}
-	resp, err := c.Do(req)
-	if err != nil {
-		return err
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("message bus %s: HTTP %d", event, resp.StatusCode)
-	}
-	return nil
-}
+func (n Notifier) bus() ysk.Notifier { return ysk.Notifier{BusURLFile: n.BusURLFile, Client: n.Client} }
 
 // Show sends (or re-sends) the card.
 func (n Notifier) Show(ctx context.Context, lang string, list []Update) error {
-	b, err := json.Marshal(build(lang, list))
-	if err != nil {
-		return err
-	}
-	return n.publish(ctx, "ysk:card:upsert", map[string]string{"card:body": string(b)})
+	return n.bus().Show(ctx, build(lang, list))
 }
 
 // Withdraw removes the card from the dashboards that are open right now.
 func (n Notifier) Withdraw(ctx context.Context) error {
-	return n.publish(ctx, "ysk:card:delete", map[string]string{"card:id": CardID})
+	return n.bus().Withdraw(ctx, CardID)
 }
 
 // Keeper holds the result of the last check and re-sends the card every
