@@ -252,8 +252,14 @@ func TestUILangIsStoredForTheDashboardCard(t *testing.T) {
 	if got := updates.ReadLang(langDir); got != "de" {
 		t.Fatalf("stored %q", got)
 	}
-	if w := do(t, mux, http.MethodPost, "/modmanager/ui-lang", `{"lang":"fr"}`, nil); w.Code != http.StatusBadRequest {
-		t.Fatalf("fr: %d", w.Code)
+	if w := do(t, mux, http.MethodPost, "/modmanager/ui-lang", `{"lang":"xx"}`, nil); w.Code != http.StatusBadRequest {
+		t.Fatalf("xx: %d", w.Code)
+	}
+	if w := do(t, mux, http.MethodPost, "/modmanager/ui-lang", `{"lang":"fr"}`, nil); w.Code != http.StatusOK || updates.ReadLang(langDir) != "fr" {
+		t.Fatalf("fr: %d, stored %q", w.Code, updates.ReadLang(langDir))
+	}
+	if w := do(t, mux, http.MethodPost, "/modmanager/ui-lang", `{"lang":"de"}`, nil); w.Code != http.StatusOK {
+		t.Fatalf("de again: %d", w.Code)
 	}
 	if w := do(t, mux, http.MethodGet, "/modmanager/ui-lang", ``, nil); w.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("GET: %d", w.Code)
