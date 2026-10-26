@@ -205,6 +205,7 @@ func catalogActionHandler(cat catalogService, action string) http.HandlerFunc {
 			return
 		}
 		log.Printf("[modmanager] catalog %s %s: done", action, target)
+		onCatalogChange()
 		entries, repos, err := cat.List(ctx)
 		if err != nil {
 			writeCatalogError(w, err)
@@ -282,6 +283,10 @@ func writeCatalogError(w http.ResponseWriter, err error) {
 		httpx.WriteError(w, http.StatusBadGateway, "failed", err.Error())
 	}
 }
+
+// onCatalogChange runs after a successful catalog action; main points it at
+// the update check, so the dashboard card does not wait 12 hours.
+var onCatalogChange = func() {}
 
 // langDir holds the page's language for the dashboard card (internal/updates).
 var langDir = "/DATA/AppData/modmanager"

@@ -228,6 +228,31 @@ type Keeper struct {
 	shown   bool
 	sent    string
 	lastErr string
+	kick    chan struct{}
+}
+
+// Kick asks Run for a check now: after an install from the catalog the card
+// must not wait for the next 12-hour check. It never blocks.
+func (k *Keeper) Kick() {
+	k.mu.Lock()
+	if k.kick == nil {
+		k.kick = make(chan struct{}, 1)
+	}
+	c := k.kick
+	k.mu.Unlock()
+	select {
+	case c <- struct{}{}:
+	default: // a check is asked for already
+	}
+}
+
+func (k *Keeper) kicks() <-chan struct{} {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.kick == nil {
+		k.kick = make(chan struct{}, 1)
+	}
+	return k.kick
 }
 
 // Set stores the result of a check.
@@ -280,28 +305,34 @@ func (k *Keeper) Round(ctx context.Context) {
 	}
 }
 
-// Run checks for updates every check interval (the first time after delay)
-// and runs a card round every minute, until ctx ends.
+// Run checks for updates every check interval (the first time after delay,
+// and at once on Kick) and runs a card round every minute, until ctx ends.
 func Run(ctx context.Context, k *Keeper, src Source, installed string, delay, every time.Duration) {
 	check := time.NewTimer(delay)
 	defer check.Stop()
 	round := time.NewTicker(time.Minute)
 	defer round.Stop()
+	kick := k.kicks()
+	look := func() {
+		cctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		list, err := Find(cctx, src, installed)
+		cancel()
+		if err != nil {
+			log.Printf("[modmanager] update check: %v", err)
+		} else {
+			k.Set(list)
+		}
+		k.Round(ctx)
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-check.C:
-			cctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-			list, err := Find(cctx, src, installed)
-			cancel()
-			if err != nil {
-				log.Printf("[modmanager] update check: %v", err)
-			} else {
-				k.Set(list)
-			}
+			look()
 			check.Reset(every)
-			k.Round(ctx)
+		case <-kick:
+			look()
 		case <-round.C:
 			k.Round(ctx)
 		}

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/chicohaager/modmanager/internal/catalog"
 )
@@ -169,4 +170,54 @@ func TestLangFile(t *testing.T) {
 	if err := WriteLang(dir, "fr\n../x"); err == nil {
 		t.Error("only en and de are stored")
 	}
+}
+
+// countingSource answers with the list it holds and counts the checks.
+type countingSource struct {
+	mu    sync.Mutex
+	n     int
+	state string
+}
+
+func (c *countingSource) List(context.Context) ([]catalog.Entry, []string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.n++
+	return []catalog.Entry{{Title: "Nebula", Installed: true, State: c.state, InstalledVersion: "1.0.9", Version: "v1.1.0"}}, nil, nil
+}
+func (c *countingSource) Self(context.Context, string) catalog.SelfStatus {
+	return catalog.SelfStatus{}
+}
+func (c *countingSource) checks() int { c.mu.Lock(); defer c.mu.Unlock(); return c.n }
+
+// An install from the catalog must not leave the card standing until the next 12-hour check.
+func TestKickChecksAgainAtOnce(t *testing.T) {
+	b, f := newBus(t)
+	src := &countingSource{state: "update"}
+	k := &Keeper{Notifier: Notifier{BusURLFile: f}, Lang: func() string { return "en" }}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go Run(ctx, k, src, "0.3.0", 0, time.Hour)
+	waitFor(t, func() bool { return src.checks() == 1 })
+	src.mu.Lock()
+	src.state = "current" // the user installed the update
+	src.mu.Unlock()
+	k.Kick()
+	waitFor(t, func() bool { return src.checks() == 2 })
+	waitFor(t, func() bool {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return len(b.events) > 0 && b.events[len(b.events)-1] == "ysk:card:delete"
+	})
+}
+
+func waitFor(t *testing.T, ok func() bool) {
+	t.Helper()
+	for i := 0; i < 200; i++ {
+		if ok() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("condition not reached in 2 s")
 }

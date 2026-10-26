@@ -265,3 +265,21 @@ func TestUILangIsStoredForTheDashboardCard(t *testing.T) {
 		t.Fatalf("without a token: %d, stored %q", w.Code, updates.ReadLang(langDir))
 	}
 }
+
+// After an install the dashboard card about module updates is checked again at once.
+func TestACatalogChangeAsksForAnUpdateCheck(t *testing.T) {
+	n := 0
+	onCatalogChange = func() { n++ }
+	t.Cleanup(func() { onCatalogChange = func() {} })
+	mux := newMux(&fakeSvc{}, &fakeCat{}, requireToken)
+	if w := do(t, mux, http.MethodPost, "/modmanager/catalog/install", `{"id":"gh:a/b"}`, nil); w.Code != http.StatusOK {
+		t.Fatalf("install: %d %s", w.Code, w.Body)
+	}
+	if n != 1 {
+		t.Fatalf("update checks asked for: %d, want 1", n)
+	}
+	_ = do(t, newMux(&fakeSvc{}, &fakeCat{err: catalog.ErrNotNewer}, requireToken), http.MethodPost, "/modmanager/catalog/install", `{"id":"gh:a/b"}`, nil)
+	if n != 1 {
+		t.Fatalf("a failed install asked for a check: %d", n)
+	}
+}
