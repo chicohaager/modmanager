@@ -2,8 +2,11 @@
 
 Releases: https://github.com/chicohaager/modmanager/releases. Every release is amd64 only and tested on a ZimaBoard 2 with ZimaOS 1.8.0.
 
-## Unreleased
+## 0.3.0 — 2026-10-26
 
+- French UI: every text also in French (menu: Français; auto picks it when the ZimaOS user's language, or without one the browser's, is French), the dashboard card too; the i18n check now fails when any language lacks a text or the menu lacks a language.
+- Pangolin in the catalog (`chicohaager/zimaos-pangolin-sysext` v1.0.0: the Pangolin CLI's site tunnel and the CLI in the ZimaOS terminal, installed version from `/pangolin/health`).
+- CI builds against lintux-modkit v0.1.0 (tagged), not its moving `main`.
 - CI on every push and pull request: gofmt, go vet, `node --check` on the frontend, `go test -race`, govulncheck (advisory), build for amd64 and arm64 (arm64 built, not tested on hardware).
 - README: screenshots of the three tabs; this changelog.
 - German UI: every text in English and German, language auto (from the ZimaOS user's setting) or chosen in the header; error codes of the API and of catalog entries are translated, the installed-modules table shows the modules' German titles; a check fails the build when a text or an error code has no translation.
