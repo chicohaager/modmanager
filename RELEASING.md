@@ -1,5 +1,7 @@
 # Releasing
 
+0. **lintux-modkit.** `lintux-modkit.ref` names the tag and commit CI checks out; `build.sh` refuses a sibling `../lintux-modkit` on another commit or with local changes. A new lintux-modkit release: tag it there, put `<tag> <commit>` into `lintux-modkit.ref`, commit. (`MODKIT_DEV=1 sh build.sh` builds against any checkout, with a warning — never for a release.)
+
 1. **Version and build.** Set `version` in `cmd/modmanager/main.go`, then build and commit everything the build changed (it writes the version into `index.html`):
 
    ```sh

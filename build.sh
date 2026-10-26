@@ -10,6 +10,7 @@ VERSION=$(sed -n 's/^\s*version\s*=\s*"\(.*\)".*/\1/p' cmd/modmanager/main.go)
 WEB=raw/usr/share/casaos/www/modules/modmanager
 echo "modmanager v$VERSION linux/$ARCH"
 
+sh scripts/modkit-check.sh     # the lintux-modkit commit of lintux-modkit.ref, no local changes
 go vet ./...
 go test -count=1 ./...
 node --check "$WEB/app.js"
