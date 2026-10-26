@@ -10,7 +10,7 @@ Hide or restore the apps ZimaOS ships built in — Photos, PeerDrop, ZVM and the
 |---|---|
 | ![Catalog: the Lintux modules with installed version, updates and install](docs/screenshots/catalog.png) | ![Installed modules: every module ZimaOS currently has merged](docs/screenshots/installed-modules.png) |
 
-Screenshots: Module Manager 0.2.5 on a ZimaBoard 2 with ZimaOS 1.8.0 (dark theme), 2026-10-23. Changes per release: [CHANGELOG.md](CHANGELOG.md).
+Screenshots: Module Manager 0.3.1 with the data of a ZimaBoard 2 running ZimaOS 1.8.0 (dark theme), 2026-10-26. Changes per release: [CHANGELOG.md](CHANGELOG.md).
 
 ## How each kind of app is hidden
 
