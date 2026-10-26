@@ -103,6 +103,12 @@ function initTheme() {
   });
 }
 
+// The backend has no user token for the ZimaOS language: the page tells it, so the
+// dashboard card about module updates speaks the same language. Failure changes nothing here.
+function reportLang() {
+  api(`${API_BASE}/ui-lang`, { method: 'POST', body: { lang: LANG } }).catch(() => {});
+}
+
 function initLangSelect() {
   const sel = $('#lang-select');
   const stored = safeGet('modmanager.lang');
@@ -110,6 +116,7 @@ function initLangSelect() {
   sel.addEventListener('change', async () => {
     safeSet('modmanager.lang', sel.value);
     await initLang();
+    reportLang();
     applyStaticTexts();
     renderApps();
     renderCatalog();
@@ -426,12 +433,16 @@ async function refreshAll() {
 document.addEventListener('DOMContentLoaded', async () => {
   initTheme();
   await initLang();
+  reportLang();
   applyStaticTexts();
   initLangSelect();
   document.querySelectorAll('.tab-btn').forEach((b) => b.addEventListener('click', () => {
     document.querySelectorAll('.tab-btn').forEach((x) => x.classList.toggle('active', x === b));
     document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === `tab-${b.dataset.tab}`));
   }));
+  // #catalog (the button on the dashboard card) opens the catalog tab.
+  const tab = document.querySelector(`.tab-btn[data-tab="${location.hash.slice(1)}"]`);
+  if (tab) tab.click();
   $('#apps').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-act]');
     if (!b || b.disabled) return;

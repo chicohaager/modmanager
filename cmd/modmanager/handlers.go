@@ -11,6 +11,7 @@ import (
 	"github.com/chicohaager/lintux-modkit/httpx"
 	"github.com/chicohaager/modmanager/internal/catalog"
 	"github.com/chicohaager/modmanager/internal/sysapps"
+	"github.com/chicohaager/modmanager/internal/updates"
 )
 
 // catalogTimeout covers downloading an image and zpkg installing it.
@@ -54,6 +55,7 @@ func newMux(svc appService, cat catalogService, verify func(http.Handler) http.H
 	mux.Handle(routePrefix+"/catalog/repos/remove", logged(verify(catalogActionHandler(cat, "remove-repo"))))
 	mux.Handle(routePrefix+"/self", logged(verify(selfHandler(cat))))
 	mux.Handle(routePrefix+"/self/update", logged(verify(selfUpdateHandler(cat))))
+	mux.Handle(routePrefix+"/ui-lang", logged(verify(uiLangHandler())))
 	return mux
 }
 
@@ -278,5 +280,30 @@ func writeCatalogError(w http.ResponseWriter, err error) {
 		httpx.WriteError(w, http.StatusConflict, "not_installed", err.Error())
 	default:
 		httpx.WriteError(w, http.StatusBadGateway, "failed", err.Error())
+	}
+}
+
+// langDir holds the page's language for the dashboard card (internal/updates).
+var langDir = "/DATA/AppData/modmanager"
+
+// uiLangHandler stores the language the page shows ("en" or "de"): the backend
+// has no user token to read the ZimaOS setting itself.
+func uiLangHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			httpx.MethodNotAllowed(w)
+			return
+		}
+		var in struct {
+			Lang string `json:"lang"`
+		}
+		if !httpx.Decode(w, r, &in) {
+			return
+		}
+		if err := updates.WriteLang(langDir, in.Lang); err != nil {
+			httpx.WriteError(w, http.StatusBadRequest, "bad_lang", err.Error())
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	}
 }

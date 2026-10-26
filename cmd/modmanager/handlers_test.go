@@ -11,6 +11,7 @@ import (
 
 	"github.com/chicohaager/modmanager/internal/catalog"
 	"github.com/chicohaager/modmanager/internal/sysapps"
+	"github.com/chicohaager/modmanager/internal/updates"
 )
 
 type fakeSvc struct {
@@ -238,5 +239,29 @@ func TestCatalogErrorsMapToStatusAndCode(t *testing.T) {
 		if w.Code != c.status || !strings.Contains(w.Body.String(), `"`+c.code+`"`) {
 			t.Errorf("%v: %d %s, want %d %s", c.err, w.Code, w.Body, c.status, c.code)
 		}
+	}
+}
+
+// The page reports its language, so the dashboard card about module updates speaks it.
+func TestUILangIsStoredForTheDashboardCard(t *testing.T) {
+	langDir = t.TempDir()
+	mux := newMux(&fakeSvc{}, &fakeCat{}, requireToken)
+	if w := do(t, mux, http.MethodPost, "/modmanager/ui-lang", `{"lang":"de"}`, nil); w.Code != http.StatusOK {
+		t.Fatalf("de: %d %s", w.Code, w.Body)
+	}
+	if got := updates.ReadLang(langDir); got != "de" {
+		t.Fatalf("stored %q", got)
+	}
+	if w := do(t, mux, http.MethodPost, "/modmanager/ui-lang", `{"lang":"fr"}`, nil); w.Code != http.StatusBadRequest {
+		t.Fatalf("fr: %d", w.Code)
+	}
+	if w := do(t, mux, http.MethodGet, "/modmanager/ui-lang", ``, nil); w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET: %d", w.Code)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/modmanager/ui-lang", strings.NewReader(`{"lang":"en"}`))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized || updates.ReadLang(langDir) != "de" {
+		t.Fatalf("without a token: %d, stored %q", w.Code, updates.ReadLang(langDir))
 	}
 }

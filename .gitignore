@@ -1,3 +1,4 @@
 raw/usr/bin/
 dist/
 __pycache__/
+build.log
