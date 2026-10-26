@@ -1,6 +1,6 @@
 # Module Manager for ZimaOS
 
-**Version 0.3.1** · ZimaOS 1.8.0 (amd64) · sysext module `modmanager`
+**Version 0.3.2** · ZimaOS 1.8.0 (amd64) · sysext module `modmanager`
 
 Hide or restore the apps ZimaOS ships built in — Photos, PeerDrop, ZVM and the Backup tile — and see every installed module. Nothing is deleted unless you ask for it: **Restore** brings an app back exactly as ZimaOS shipped it.
 
@@ -38,11 +38,11 @@ The Backup tile can only be hidden by writing into `/var/lib/casaos/db/user.db`,
 
 ## Catalog
 
-Version 0.2.0 adds a catalog: the Lintux module repositories (cron, Sync & Backup, Web FTP Client, since 0.2.5 Admin Tools, WireGuard, Nebula and restic Backup, since 0.3.0 Pangolin installable here; ZFW, mergerfs + SnapRAID and Tailscale with their own installer, whose command is shown — it must run as root on the host — paste it into the ZimaOS terminal; the UI says so above the command), and any GitHub repository you enter. The Mod Store list of ZimaOS' module management is not shown. Installation goes through `zpkg`, IceWhale's module CLI. Files is not listed among the built-in apps: ZimaOS needs it.
+Version 0.2.0 adds a catalog: the Lintux module repositories (cron, Sync & Backup, Web FTP Client, since 0.2.5 Admin Tools, WireGuard, Nebula and restic Backup, since 0.3.0 Pangolin, since 0.3.2 Prometheus Exporter installable here; ZFW, mergerfs + SnapRAID and Tailscale with their own installer, whose command is shown — it must run as root on the host — paste it into the ZimaOS terminal; the UI says so above the command), and any GitHub repository you enter. The Mod Store list of ZimaOS' module management is not shown. Installation goes through `zpkg`, IceWhale's module CLI. Files is not listed among the built-in apps: ZimaOS needs it.
 
 An update keeps a copy of the installed image: when the new one does not install, the previous version is installed again and the error says so. A release with arch-specific images (`name-amd64.raw`) and an arch-less `name.raw` offers that `name.raw` to amd64 only — lintux-modkit's build writes it as a copy of the amd64 image. A GitHub image is installed only when its release ships a sha256 checksum and the download matches it, and only when none of its files exists on the host already: a module overlays `/usr`, so such a file would replace ZimaOS' own for every service (the check lists the image with the host's `unsquashfs`; on an update the files of the installed version do not count). **That proves the file arrived intact — not that the module's author can be trusted:** the checksum comes from the same release as the image. A module runs as root on the host. Add only repositories you trust; the UI marks them as third-party.
 
-For the Lintux modules the catalog shows the **installed version**, read where the module reports it (the health route of Cron, Sync & Backup, ZFW, Admin Tools, WireGuard, Nebula, restic Backup and Pangolin, `SYSEXT_VERSION_ID` for Tailscale) and compared semver-style with the latest release — a development build counts as older than its release, as in the lintux installer. Without a health route the catalog reads `SYSEXT_VERSION_ID` from the module's extension-release — for any module, also repositories you add. The build scripts of Cron, Sync & Backup, Web FTP Client and mergerfs + SnapRAID write it from their next build on; images built before have none, and then the installed image is compared byte for byte with the release image ("Differs from vX").
+For the Lintux modules the catalog shows the **installed version**, read where the module reports it (the health route of Cron, Sync & Backup, ZFW, Admin Tools, WireGuard, Nebula, restic Backup, Pangolin and Prometheus Exporter, `SYSEXT_VERSION_ID` for Tailscale) and compared semver-style with the latest release — a development build counts as older than its release, as in the lintux installer. Without a health route the catalog reads `SYSEXT_VERSION_ID` from the module's extension-release — for any module, also repositories you add. The build scripts of Cron, Sync & Backup, Web FTP Client and mergerfs + SnapRAID write it from their next build on; images built before have none, and then the installed image is compared byte for byte with the release image ("Differs from vX").
 
 ## UI
 
