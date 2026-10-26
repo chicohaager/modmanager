@@ -58,13 +58,14 @@ func main() {
 	cat := catalog.New(sysapps.ExecRunner)
 	langDir = cat.StateDir
 	// Module updates on the dashboard: the first check two minutes after the
-	// start (the gateway and /DATA come late at boot), then every 12 hours —
-	// the catalog asks GitHub once per repository (60 anonymous calls an hour).
+	// start (the gateway and /DATA come late at boot), then every 12 hours,
+	// hourly while updates wait — the catalog asks GitHub once per repository
+	// (60 anonymous calls an hour, about 11 repositories).
 	card := &updates.Keeper{
 		Notifier: updates.Notifier{BusURLFile: updates.DefaultBusURLFile},
 		Lang:     func() string { return updates.ReadLang(langDir) },
 	}
-	go updates.Run(context.Background(), card, cat, version, 2*time.Minute, 12*time.Hour)
+	go updates.Run(context.Background(), card, cat, version, 2*time.Minute, 12*time.Hour, time.Hour)
 	onCatalogChange = card.Kick
 
 	srv := &http.Server{

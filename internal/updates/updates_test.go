@@ -197,7 +197,7 @@ func TestKickChecksAgainAtOnce(t *testing.T) {
 	k := &Keeper{Notifier: Notifier{BusURLFile: f}, Lang: func() string { return "en" }}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go Run(ctx, k, src, "0.3.0", 0, time.Hour)
+	go Run(ctx, k, src, "0.3.0", 0, time.Hour, time.Hour)
 	waitFor(t, func() bool { return src.checks() == 1 })
 	src.mu.Lock()
 	src.state = "current" // the user installed the update
@@ -220,4 +220,25 @@ func waitFor(t *testing.T, ok func() bool) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("condition not reached in 2 s")
+}
+
+// An update installed past the catalog (a module's own installer, zpkg by hand) gets no Kick:
+// while the card names updates, the check runs at the short interval, not after 12 hours.
+func TestWhileUpdatesWaitTheCheckRunsSooner(t *testing.T) {
+	_, f := newBus(t)
+	src := &countingSource{state: "update"}
+	k := &Keeper{Notifier: Notifier{BusURLFile: f}, Lang: func() string { return "en" }}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go Run(ctx, k, src, "0.3.0", 0, time.Hour, 20*time.Millisecond)
+	waitFor(t, func() bool { return src.checks() >= 3 })
+	src.mu.Lock()
+	src.state = "current"
+	src.mu.Unlock()
+	waitFor(t, func() bool { return src.checks() >= 4 })
+	n := src.checks()
+	time.Sleep(100 * time.Millisecond)
+	if src.checks() != n {
+		t.Fatalf("with nothing waiting the check kept running at the short interval: %d → %d", n, src.checks())
+	}
 }
