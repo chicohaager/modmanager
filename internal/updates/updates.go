@@ -73,6 +73,7 @@ type words struct{ one, many, open string }
 var texts = map[string]words{
 	"en": {one: "1 module update: ", many: "{n} module updates: ", open: "Open Module Manager"},
 	"de": {one: "1 Modul-Update: ", many: "{n} Modul-Updates: ", open: "Module Manager öffnen"},
+	"fr": {one: "1 mise à jour de module : ", many: "{n} mises à jour de modules : ", open: "Ouvrir Module Manager"},
 }
 
 func wordsFor(lang string) words {
@@ -265,22 +266,23 @@ func Run(ctx context.Context, k *Keeper, src Source, installed string, delay, ev
 }
 
 // The UI's language, reported by the page (it knows the ZimaOS user's
-// setting, the backend has no token for it). Only "en" and "de" exist.
+// setting, the backend has no token for it). Only the languages of texts exist.
 func langFile(dir string) string { return filepath.Join(dir, "ui-lang") }
 
 // ReadLang returns the stored language, "en" when there is none.
 func ReadLang(dir string) string {
 	b, err := os.ReadFile(langFile(dir))
-	if err == nil && strings.TrimSpace(string(b)) == "de" {
-		return "de"
+	lang := strings.TrimSpace(string(b))
+	if _, ok := texts[lang]; err == nil && ok {
+		return lang
 	}
 	return "en"
 }
 
-// WriteLang stores "en" or "de".
+// WriteLang stores "en", "de" or "fr".
 func WriteLang(dir, lang string) error {
-	if lang != "en" && lang != "de" {
-		return fmt.Errorf("language %q: en or de", lang)
+	if _, ok := texts[lang]; !ok {
+		return fmt.Errorf("language %q: en, de or fr", lang)
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err

@@ -65,13 +65,16 @@ func TestFindReportsAFailedList(t *testing.T) {
 	}
 }
 
-func TestCardTextInBothLanguagesAndWithinTheVisibleBudget(t *testing.T) {
+func TestCardTextInEveryLanguageAndWithinTheVisibleBudget(t *testing.T) {
 	one := []Update{{Title: "Nebula", From: "1.1.0", To: "v1.1.1"}}
 	if got := Text("de", one); got != "1 Modul-Update: Nebula 1.1.0 → v1.1.1" {
 		t.Errorf("de: %q", got)
 	}
 	if got := Text("en", one); got != "1 module update: Nebula 1.1.0 → v1.1.1" {
 		t.Errorf("en: %q", got)
+	}
+	if got := Text("fr", one); got != "1 mise à jour de module : Nebula 1.1.0 → v1.1.1" {
+		t.Errorf("fr: %q", got)
 	}
 	if got := Text("xx", one); !strings.HasPrefix(got, "1 module update") {
 		t.Errorf("unknown language falls back to English: %q", got)
@@ -80,9 +83,11 @@ func TestCardTextInBothLanguagesAndWithinTheVisibleBudget(t *testing.T) {
 	for i := range many {
 		many[i] = Update{Title: "Module number " + string(rune('A'+i)), From: "1.0.0", To: "v1.0.1"}
 	}
-	got := Text("de", many)
-	if !strings.HasPrefix(got, "9 Modul-Updates: ") || len([]rune(got)) > budget || !strings.HasSuffix(got, "…") {
-		t.Errorf("long list: %d runes %q", len([]rune(got)), got)
+	for lang, lead := range map[string]string{"de": "9 Modul-Updates: ", "fr": "9 mises à jour de modules : "} {
+		got := Text(lang, many)
+		if !strings.HasPrefix(got, lead) || len([]rune(got)) > budget || !strings.HasSuffix(got, "…") {
+			t.Errorf("%s long list: %d runes %q", lang, len([]rune(got)), got)
+		}
 	}
 }
 
@@ -167,8 +172,19 @@ func TestLangFile(t *testing.T) {
 	if got := ReadLang(dir); got != "de" {
 		t.Errorf("after de: %q", got)
 	}
-	if err := WriteLang(dir, "fr\n../x"); err == nil {
-		t.Error("only en and de are stored")
+	if err := WriteLang(dir, "fr"); err != nil {
+		t.Fatal(err)
+	}
+	if got := ReadLang(dir); got != "fr" {
+		t.Errorf("after fr: %q", got)
+	}
+	for _, bad := range []string{"fr\n../x", "xx", ""} {
+		if err := WriteLang(dir, bad); err == nil {
+			t.Errorf("%q stored: only en, de and fr are", bad)
+		}
+	}
+	if got := ReadLang(dir); got != "fr" {
+		t.Errorf("a refused write changed the stored language: %q", got)
 	}
 }
 

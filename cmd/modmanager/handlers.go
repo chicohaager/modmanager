@@ -291,7 +291,7 @@ var onCatalogChange = func() {}
 // langDir holds the page's language for the dashboard card (internal/updates).
 var langDir = "/DATA/AppData/modmanager"
 
-// uiLangHandler stores the language the page shows ("en" or "de"): the backend
+// uiLangHandler stores the language the page shows ("en", "de" or "fr"): the backend
 // has no user token to read the ZimaOS setting itself.
 func uiLangHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

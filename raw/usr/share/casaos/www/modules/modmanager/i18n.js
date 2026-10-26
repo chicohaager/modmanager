@@ -1,7 +1,7 @@
 'use strict';
-// Texts of the UI in English and German. The language follows the ZimaOS user's setting
+// Texts of the UI in English, German and French. The language follows the ZimaOS user's setting
 // (GET /v1/users/current/custom/system → data.lang, e.g. "de_DE", measured on 1.8.0) unless the
-// language menu says otherwise. Every key must exist in both languages (scripts/i18n-check.mjs).
+// language menu says otherwise. Every key must exist in every language (scripts/i18n-check.mjs).
 // {name} placeholders are filled by t(); th() escapes them for HTML and keeps the markup of the text.
 
 const TEXTS = {
@@ -59,7 +59,7 @@ const TEXTS = {
     'self.timeout': 'No answer from Module Manager after 3 minutes. Log: /DATA/AppData/modmanager/self-update/log',
     // codes of the API's errors (cmd/modmanager/handlers.go) and of catalog entries (error_code)
     'code.bad_repo': 'Not a GitHub repository (owner/repo or https://github.com/owner/repo).',
-    'code.bad_lang': 'Unknown language (en or de).',
+    'code.bad_lang': 'Unknown language (en, de or fr).',
     'code.unknown_entry': 'Unknown catalog entry.',
     'code.no_image': 'The latest release has no sysext image (.raw) for this CPU.',
     'code.no_checksum': 'The release ships no sha256 checksum; it cannot be installed from here.',
@@ -130,7 +130,7 @@ const TEXTS = {
     'self.failed': 'Das Update auf {v} ist fehlgeschlagen; {old} ist wieder installiert. Protokoll: /DATA/AppData/modmanager/self-update/log',
     'self.timeout': 'Keine Antwort von Module Manager nach 3 Minuten. Protokoll: /DATA/AppData/modmanager/self-update/log',
     'code.bad_repo': 'Kein GitHub-Repository (besitzer/repo oder https://github.com/besitzer/repo).',
-    'code.bad_lang': 'Unbekannte Sprache (en oder de).',
+    'code.bad_lang': 'Unbekannte Sprache (en, de oder fr).',
     'code.unknown_entry': 'Unbekannter Katalogeintrag.',
     'code.no_image': 'Das neueste Release hat kein sysext-Image (.raw) für diese CPU.',
     'code.no_checksum': 'Das Release liefert keine sha256-Prüfsumme; von hier aus ist es nicht installierbar.',
@@ -148,9 +148,85 @@ const TEXTS = {
     'code.confirm_mismatch': 'Der eingegebene Name passt nicht.',
     'code.failed': 'Fehlgeschlagen: {detail}', 'code.internal': 'Interner Fehler: {detail}',
   },
+  fr: {
+    'header.subtitle': 'Masquer ou restaurer les applications intégrées à ZimaOS et voir tous les modules installés.',
+    'theme.auto': 'Thème : automatique', 'theme.light': 'Thème : clair', 'theme.dark': 'Thème : sombre',
+    'lang.auto': 'Langue : automatique', 'lang.label': 'Langue',
+    'btn.refresh': 'Actualiser',
+    'tab.builtin': 'Applications intégrées', 'tab.catalog': 'Catalogue', 'tab.installed': 'Modules installés',
+    'hint.builtin': '<b>Masquer</b> retire une application du tableau de bord et arrête ses services. Rien n’est supprimé : <b>Restaurer</b> la remet exactement comme ZimaOS la livre. ZimaOS garde ces applications dans son image système en lecture seule : on peut les masquer, pas les supprimer. Les données restent jusqu’à ce que vous choisissiez <b>Supprimer les données</b> pour une application masquée.',
+    'hint.catalog': 'Installer des modules depuis des releases GitHub. Un module s’exécute <b>en root</b> sur cet hôte. Une image GitHub n’est installée que si sa release fournit une somme de contrôle sha256 et que le téléchargement y correspond &mdash; cela prouve que le fichier <b>est arrivé intact</b>, pas que son auteur est digne de confiance : la somme de contrôle vient de la même release. À la désinstallation, les données d’un module restent dans <span class="mono">/DATA/AppData</span>.',
+    'repo.label': 'Ajouter un module GitHub', 'repo.placeholder': 'propriétaire/dépôt ou https://github.com/propriétaire/dépôt', 'repo.add': 'Ajouter',
+    'repo.rule': 'La dernière release doit contenir une image sysext (<span class="mono">name-amd64.raw</span> ou <span class="mono">name.raw</span>) et sa somme de contrôle.',
+    'repo.trust': 'N’ajoutez que des dépôts dont vous connaissez et approuvez l’auteur. Un module installé s’exécute en root et peut tout lire et modifier sur cet hôte ZimaOS ; la somme de contrôle ne le vérifie pas.',
+    'section.github': 'Modules GitHub', 'loading': 'Chargement…',
+    'hint.installed': 'Tous les modules que ZimaOS a actuellement intégrés, tels que sa gestion des modules les signale.',
+    'th.module': 'Module', 'th.title': 'Titre', 'th.services': 'Services', 'th.installed': 'Installé', 'th.source': 'Origine',
+    'purge.title': 'Supprimer les données', 'purge.type1': 'Saisissez', 'purge.type2': 'pour confirmer.', 'purge.cancel': 'Annuler', 'purge.ok': 'Supprimer les données',
+    'purge.text': 'Cela supprime définitivement {path} ({size}) : l’index, les réglages et les modèles de l’application. Vos propres fichiers ailleurs ne sont pas touchés ; la suppression est refusée si une photo ou une vidéo s’y trouve.',
+    'err.session': 'Session expirée — rechargez la page ZimaOS et reconnectez-vous.',
+    'kind.sysext': 'extension système', 'kind.base': 'image système', 'kind.system': 'tuile système',
+    'pill.locked': 'Verrouillé', 'pill.hidden': 'Masqué', 'pill.visible': 'Visible',
+    'svc.masked': 'masqué', 'svc.unknown': 'inconnu', 'pill.data': 'données {size}',
+    'svc.active': 'actif', 'svc.inactive': 'inactif', 'svc.failed': 'en échec', 'svc.activating': 'démarrage',
+    'pill.experimental': 'expérimental', 'pill.experimental.title': 'Écrit dans la base des utilisateurs de ZimaOS (interne, peut changer avec chaque mise à jour de ZimaOS). Une sauvegarde est faite avant chaque modification.',
+    'btn.restore': 'Restaurer', 'btn.purge': 'Supprimer les données', 'btn.hide': 'Masquer',
+    'apps.none': 'Aucune application intégrée trouvée.',
+    'act.hide': 'Masquage de {name} — ZimaOS réintègre ses extensions système, cela prend quelques secondes…',
+    'act.restore': 'Restauration de {name} — ZimaOS réintègre ses extensions système, cela prend quelques secondes…',
+    'act.purge': 'Suppression des données de {name} — cela prend quelques secondes…',
+    'done.hide': '{name} : masqué. Rechargez le tableau de bord ZimaOS pour voir le changement.',
+    'done.restore': '{name} : restauré. Rechargez le tableau de bord ZimaOS pour voir le changement.',
+    'done.purge': '{name} : données supprimées.',
+    'blocked.dependency': 'Fichiers et la recherche en dépendent',
+    'blocked.schema': 'La base des utilisateurs de ZimaOS a changé ; le masquage est désactivé par sécurité.',
+    'blocked.version': 'Non vérifié sur cette version de ZimaOS ; le masquage est désactivé.',
+    'mods.added': 'ajouté', 'mods.none': 'Aucun module signalé.',
+    'badge.own': 'Installateur propre', 'badge.notInstalled': 'Non installé', 'badge.current': 'À jour · {v}', 'badge.currentPlain': 'À jour',
+    'badge.update': 'Mise à jour {iv} → {rel}', 'badge.newer': '{iv} · plus récent que {rel}', 'badge.newer.title': 'Une version de développement plus récente que la dernière release.',
+    'badge.differs': 'Diffère de {rel}', 'badge.differs.title': 'L’image installée n’est pas celle de la release ; elle peut être plus ancienne ou une version de développement.',
+    'badge.installed': 'Installé', 'word.release': 'release', 'badge.thirdParty': 'tiers',
+    'card.rootNote': '<span class="pill pill-root">root</span> Doit s’exécuter en root : ouvrez le terminal ZimaOS, connectez-vous avec votre utilisateur ZimaOS et collez la commande — <code>sudo</code> demande votre mot de passe ZimaOS.',
+    'btn.copy': 'Copier', 'card.ownInstaller': 'Nécessite son propre installateur (il configure plus que l’image).',
+    'btn.install': 'Installer', 'btn.updateTo': 'Mettre à jour vers {rel}', 'btn.installRel': 'Installer {rel}', 'btn.reinstall': 'Réinstaller',
+    'btn.uninstall': 'Désinstaller', 'btn.uninstallAgain': 'Cliquez à nouveau pour désinstaller',
+    'btn.removeFromList': 'Retirer de la liste', 'btn.removeFromList.title': 'Retirer de cette liste (un module installé reste installé)',
+    'card.trust': 'Dépôt tiers que vous avez ajouté : la somme de contrôle prouve seulement que le téléchargement est intact, pas que l’auteur est digne de confiance. Le module s’exécuterait en root.',
+    'cat.none': 'Aucun module GitHub.', 'cat.done': '{what} : terminé.',
+    'cat.stale': 'Infos de release du {time} — limite GitHub atteinte, releases plus récentes non vérifiées.',
+    'what.adding': 'Ajout de {repo}', 'what.installing': 'Installation de {title} (téléchargement, somme de contrôle, zpkg)', 'what.uninstalling': 'Désinstallation de {title}', 'what.removing': 'Retrait de {repo} de la liste',
+    'copy.ok': 'Commande copiée.', 'copy.fail': 'Échec de la copie — sélectionnez la commande et copiez-la à la main.',
+    'self.update': 'Mettre à jour vers {v}', 'self.again': 'Cliquez à nouveau : mise à jour vers {v}', 'self.checking': 'Téléchargement et vérification de {v}…',
+    'self.updating': 'Mise à jour vers {v} — Module Manager redémarre ; la page se recharge dès qu’il répond à nouveau…',
+    'self.failed': 'La mise à jour vers {v} a échoué ; {old} est de nouveau installé. Journal : /DATA/AppData/modmanager/self-update/log',
+    'self.timeout': 'Pas de réponse de Module Manager après 3 minutes. Journal : /DATA/AppData/modmanager/self-update/log',
+    'code.bad_repo': 'Pas un dépôt GitHub (propriétaire/dépôt ou https://github.com/propriétaire/dépôt).',
+    'code.bad_lang': 'Langue inconnue (en, de ou fr).',
+    'code.unknown_entry': 'Entrée de catalogue inconnue.',
+    'code.no_image': 'La dernière release n’a pas d’image sysext (.raw) pour ce processeur.',
+    'code.no_checksum': 'La release ne fournit pas de somme de contrôle sha256 ; elle ne peut pas être installée d’ici.',
+    'code.checksum_mismatch': 'La somme de contrôle ne correspond pas ; non installé.',
+    'code.own_installer': 'Ce module nécessite son propre installateur ; copiez sa commande dans le terminal ZimaOS.',
+    'code.protected': 'Ce module est géré par ZimaOS ou par Module Manager lui-même et ne peut pas être modifié ici.',
+    'code.collision': 'Refusé : l’image remplacerait des fichiers que ZimaOS possède déjà : {detail}',
+    'code.not_newer': 'La dernière release n’est pas plus récente que ce Module Manager.',
+    'code.not_installed': 'Ce module n’est pas installé.',
+    'code.rate_limit': 'Limite GitHub atteinte (60 requêtes par heure sans connexion) ; réessayez plus tard.',
+    'code.no_release': 'Ce dépôt n’existe pas ou n’a pas de release.',
+    'code.unreachable': 'GitHub est injoignable.',
+    'code.missing_id': 'Aucune application indiquée.', 'code.unknown_app': 'Application inconnue.', 'code.blocked': 'Cette application ne peut pas être masquée ici : {detail}',
+    'code.not_hidden': 'L’application n’est pas masquée.', 'code.media_found': 'Refusé : des photos ou vidéos ont été trouvées dans le dossier de données : {detail}',
+    'code.confirm_mismatch': 'Le nom saisi ne correspond pas.',
+    'code.failed': 'Échec : {detail}', 'code.internal': 'Erreur interne : {detail}',
+  },
 };
 
 let LANG = 'en';
+
+// Locale for dates (undefined: the browser's, as before for English) and the key of a module's
+// ui.title in its module JSON (ZimaOS writes en_us, de_de …).
+const LOCALES = { de: 'de-DE', fr: 'fr-FR' };
+const TITLE_KEYS = { en: 'en_us', de: 'de_de', fr: 'fr_fr' };
 
 function t(key, vars = {}) {
   const s = (TEXTS[LANG] && TEXTS[LANG][key]) ?? TEXTS.en[key] ?? key;
@@ -176,7 +252,7 @@ function applyStaticTexts() {
 async function initLang() {
   let choice = null;
   try { choice = localStorage.getItem('modmanager.lang'); } catch { /* private window */ }
-  if (choice === 'en' || choice === 'de') {
+  if (Object.hasOwn(TEXTS, choice || '')) {
     LANG = choice;
     return;
   }
@@ -186,5 +262,6 @@ async function initLang() {
     const res = await fetch('/v1/users/current/custom/system', { headers: token ? { Authorization: `Bearer ${token}` } : {} });
     if (res.ok) sys = String(((await res.json()).data || {}).lang || '');
   } catch { /* no ZimaOS setting: the browser decides */ }
-  LANG = (sys || navigator.language || 'en').toLowerCase().startsWith('de') ? 'de' : 'en';
+  const code = (sys || navigator.language || 'en').toLowerCase().slice(0, 2);
+  LANG = Object.hasOwn(TEXTS, code) ? code : 'en';
 }

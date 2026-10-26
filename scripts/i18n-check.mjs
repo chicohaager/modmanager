@@ -1,5 +1,5 @@
-// Every text of the UI exists in English and German (run by build.sh and CI):
-//   1. TEXTS.en and TEXTS.de have the same keys;
+// Every text of the UI exists in every language of TEXTS — English, German, French (run by build.sh and CI):
+//   1. every language has the same keys as TEXTS.en, and none of them is missing;
 //   2. every key app.js asks for with t()/th() and every data-i18n* key of index.html exists;
 //   3. every error code the Go backend can send (WriteError codes, catalog errorCode, sysapps
 //      blocked codes) has a text — read from the Go sources, so a new code fails here;
@@ -13,14 +13,20 @@ const read = (p) => readFileSync(p, 'utf8');
 const ctx = {};
 vm.createContext(ctx);
 vm.runInContext(`${read(`${WEB}/i18n.js`)}\nthis.TEXTS = TEXTS;`, ctx);
-const { en, de } = ctx.TEXTS;
+const LANGS = ['en', 'de', 'fr'];
+const { en } = ctx.TEXTS;
 const missing = [];
+for (const l of LANGS) if (!ctx.TEXTS[l]) missing.push(`${l}: the whole language (TEXTS.${l})`);
+for (const l of Object.keys(ctx.TEXTS)) if (!LANGS.includes(l)) missing.push(`${l}: not in LANGS of this check`);
 const need = (key, where) => {
-  for (const [lang, d] of [['en', en], ['de', de]]) if (!(key in d)) missing.push(`${lang}: ${key} (${where})`);
+  for (const l of LANGS) if (ctx.TEXTS[l] && !(key in ctx.TEXTS[l])) missing.push(`${l}: ${key} (${where})`);
 };
 
-for (const k of Object.keys(en)) if (!(k in de)) missing.push(`de: ${k} (only in en)`);
-for (const k of Object.keys(de)) if (!(k in en)) missing.push(`en: ${k} (only in de)`);
+for (const l of LANGS.slice(1)) {
+  const d = ctx.TEXTS[l] || {};
+  for (const k of Object.keys(en)) if (ctx.TEXTS[l] && !(k in d)) missing.push(`${l}: ${k} (only in en)`);
+  for (const k of Object.keys(d)) if (!(k in en)) missing.push(`en: ${k} (only in ${l})`);
+}
 
 const app = read(`${WEB}/app.js`);
 for (const m of app.matchAll(/\bth?\('([\w.]+)'/g)) need(m[1], 'app.js');
@@ -29,6 +35,7 @@ for (const k of ['sysext', 'base', 'system']) need(`kind.${k}`, 'app.js kind');
 
 const html = read(`${WEB}/index.html`);
 for (const m of html.matchAll(/data-i18n(?:-html|-placeholder)?="([\w.]+)"/g)) need(m[1], 'index.html');
+for (const l of LANGS) if (!html.includes(`<option value="${l}">`)) missing.push(`index.html: no <option value="${l}"> in the language menu`);
 
 const goCodes = new Set();
 for (const f of ['cmd/modmanager/handlers.go']) for (const m of read(f).matchAll(/WriteError\(w, [^,]+, "(\w+)"/g)) goCodes.add(m[1]);
@@ -43,7 +50,7 @@ for (const m of sys.matchAll(/return "(\w+)"\n/g)) need(`blocked.${m[1]}`, 'sysa
 
 // 4: text between tags in the body must sit in an element with a data-i18n* key
 const body = html.slice(html.indexOf('<body'));
-const allowed = new Set(['Module Manager', 'English', 'Deutsch', 'Loading…', 'Loading&hellip;', 'root', '/DATA/AppData', 'name-amd64.raw', 'name.raw', 'sudo']);
+const allowed = new Set(['Module Manager', 'English', 'Deutsch', 'Français', 'Loading…', 'Loading&hellip;', 'root', '/DATA/AppData', 'name-amd64.raw', 'name.raw', 'sudo']);
 for (const m of body.matchAll(/<(\w+)([^>]*)>([^<>]*[A-Za-z]{3}[^<>]*)</g)) {
   const text = m[3].trim();
   if (!text || allowed.has(text) || /^v\d/.test(text)) continue;
@@ -55,7 +62,7 @@ for (const m of body.matchAll(/<(\w+)([^>]*)>([^<>]*[A-Za-z]{3}[^<>]*)</g)) {
   }
 }
 
-console.log(`i18n-check: ${Object.keys(en).length} keys in en, ${Object.keys(de).length} in de, ${goCodes.size} Go error codes`);
+console.log(`i18n-check: ${LANGS.map((l) => `${Object.keys(ctx.TEXTS[l] || {}).length} keys in ${l}`).join(', ')}, ${goCodes.size} Go error codes`);
 if (missing.length) {
   console.log(missing.map((x) => `  missing ${x}`).join('\n'));
   process.exit(1);

@@ -112,7 +112,7 @@ function reportLang() {
 function initLangSelect() {
   const sel = $('#lang-select');
   const stored = safeGet('modmanager.lang');
-  sel.value = stored === 'en' || stored === 'de' ? stored : 'auto';
+  sel.value = Object.hasOwn(TEXTS, stored || '') ? stored : 'auto';
   sel.addEventListener('change', async () => {
     safeSet('modmanager.lang', sel.value);
     await initLang();
@@ -260,9 +260,9 @@ async function loadModules() {
   list.sort((x, y) => String(x.name).localeCompare(String(y.name)));
   const rows = list.map((m) => {
     const titles = (m.ui && m.ui.title) || {};
-    const ti = titles[LANG === 'de' ? 'de_de' : 'en_us'] || titles.en_us || Object.values(titles)[0] || '';
+    const ti = titles[TITLE_KEYS[LANG]] || titles.en_us || Object.values(titles)[0] || '';
     const svcs = (m.services || []).map((s) => esc(s.name)).join(', ') || '<span class="muted">—</span>';
-    const when = m.created_at ? new Date(m.created_at * 1000).toLocaleDateString(LANG === 'de' ? 'de-DE' : undefined) : '—';
+    const when = m.created_at ? new Date(m.created_at * 1000).toLocaleDateString(LOCALES[LANG]) : '—';
     const src = BUILTIN.has(m.name) ? '<span class="pill pill-off">ZimaOS</span>' : `<span class="pill pill-accent">${esc(t('mods.added'))}</span>`;
     return `<tr><td class="mono">${esc(m.name)}</td><td>${esc(ti)}</td><td class="mono">${svcs}</td><td>${esc(when)}</td><td>${src}</td></tr>`;
   });
@@ -296,7 +296,7 @@ function stateBadge(e) {
 }
 
 function entryNote(e) {
-  if (e.stale_at) return t('cat.stale', { time: new Date(e.stale_at).toLocaleString(LANG === 'de' ? 'de-DE' : undefined) });
+  if (e.stale_at) return t('cat.stale', { time: new Date(e.stale_at).toLocaleString(LOCALES[LANG]) });
   return e.note || '';
 }
 
