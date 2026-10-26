@@ -34,6 +34,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/chicohaager/modmanager/internal/state"
 )
 
 // Runner runs a command and returns its combined output.
@@ -110,7 +112,7 @@ type Catalog struct {
 	GitHubAPI string // https://api.github.com
 	GitHubWeb string // https://github.com — release pages, used when the API is rate limited
 	Gateway   string // http://127.0.0.1 — modules' health routes
-	StateDir  string // /DATA/AppData/modmanager
+	StateDir  string // state.Dir, root only
 	ExtDir    string // /var/lib/extensions
 	UsrLib    string // /usr/lib — where merged extension-release files live
 	Root      string // / — the host tree an image's files are checked against
@@ -150,7 +152,7 @@ func New(run Runner) *Catalog {
 		GitHubAPI: "https://api.github.com",
 		GitHubWeb: "https://github.com",
 		Gateway:   "http://127.0.0.1",
-		StateDir:  "/DATA/AppData/modmanager",
+		StateDir:  state.Dir,
 		ExtDir:    "/var/lib/extensions",
 		UsrLib:    "/usr/lib",
 		Root:      "/",
@@ -394,6 +396,10 @@ func (c *Catalog) latest(ctx context.Context, repo string, fresh bool) (*release
 		c.cache[repo] = cached{at: time.Now(), rel: g.Rel, stale: g.At}
 		return g.Rel, g.At, nil
 	}
+	if ctx.Err() != nil {
+		// canceled (a closed tab) or out of time: that says nothing about GitHub
+		return nil, time.Time{}, err
+	}
 	c.cache[repo] = cached{at: time.Now(), err: err}
 	return nil, time.Time{}, err
 }
@@ -492,8 +498,11 @@ func archNames(goarch string) []string {
 var otherArch = regexp.MustCompile(`[-_](amd64|x86_64|x86-64|arm64|aarch64|armhf|armv7)\.raw$`)
 
 // pick chooses the image for this CPU and its checksum: <name>[-_]<arch>.raw
-// first, else a single arch-less <name>.raw. Returns the module name, the
-// image asset and the expected sha256 (empty when the release has none).
+// first, else a single arch-less <name>.raw — but only in a release without any
+// arch-specific image: lintux-modkit's build-sysext.sh writes <name>.raw for amd64
+// as a copy of <name>-amd64.raw, so next to one it is the amd64 image, and an arm64
+// host would install it. Returns the module name, the image asset and the expected
+// sha256 (empty when the release has none).
 func (c *Catalog) pick(rel *release) (string, asset, error) {
 	var chosen *asset
 	var name string
@@ -516,13 +525,16 @@ func (c *Catalog) pick(rel *release) (string, asset, error) {
 	}
 	if chosen == nil {
 		var plain []*asset
+		archSpecific := false
 		for i := range rel.Assets {
 			n := rel.Assets[i].Name
-			if strings.HasSuffix(n, ".raw") && !otherArch.MatchString(n) {
+			if otherArch.MatchString(n) {
+				archSpecific = true
+			} else if strings.HasSuffix(n, ".raw") {
 				plain = append(plain, &rel.Assets[i])
 			}
 		}
-		if len(plain) == 1 {
+		if len(plain) == 1 && !archSpecific {
 			chosen, name = plain[0], strings.TrimSuffix(plain[0].Name, ".raw")
 		}
 	}
@@ -792,13 +804,35 @@ func (c *Catalog) installRepo(ctx context.Context, repo string) error {
 	if err := c.checkCollisions(ctx, name, dst); err != nil {
 		return err
 	}
+	var previous string
 	if c.isInstalled(name) {
+		// zpkg refuses a second image of the same name, so the installed one is
+		// removed first; a copy (as zpkg wants it: <name>.raw) is the way back.
+		previous = filepath.Join(dir, "previous", name+".raw")
+		if err := os.MkdirAll(filepath.Dir(previous), 0o700); err != nil {
+			return err
+		}
+		defer func() { _ = os.RemoveAll(filepath.Dir(previous)) }()
+		if err := copyFile(c.installedFile(name), previous); err != nil {
+			return fmt.Errorf("no copy of the installed image for the way back: %w", err)
+		}
 		if _, err := c.Run(ctx, "zpkg", "remove", name); err != nil {
 			return err
 		}
 	}
-	if _, err := c.Run(ctx, "zpkg", "install", dst); err != nil {
-		return err
+	if out, err := c.Run(ctx, "zpkg", "install", dst); err != nil {
+		if previous == "" {
+			return err
+		}
+		failed := fmt.Errorf("zpkg install: %v %s", err, strings.TrimSpace(string(out)))
+		// the way back also when the request was canceled: the module must not stay removed
+		bctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+		defer cancel()
+		if _, rerr := c.Run(bctx, "zpkg", "install", previous); rerr != nil {
+			return fmt.Errorf("%w; the previous version could not be installed again: %v", failed, rerr)
+		}
+		_, _ = c.Run(bctx, "systemctl", "daemon-reload")
+		return fmt.Errorf("%w; the previous version installed again", failed)
 	}
 	_, err = c.Run(ctx, "systemctl", "daemon-reload")
 	return err

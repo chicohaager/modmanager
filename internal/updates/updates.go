@@ -13,6 +13,7 @@ package updates
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -44,26 +45,54 @@ type Source interface {
 	Self(ctx context.Context, installed string) catalog.SelfStatus
 }
 
+// ErrIncomplete: GitHub did not answer for some entries (rate limit, offline), so
+// the list may miss updates; it is no reason to withdraw the card.
+var ErrIncomplete = errors.New("update check incomplete: GitHub did not answer for every module")
+
+// IncompleteError names the entries GitHub did not answer for; errors.Is(err, ErrIncomplete).
+type IncompleteError struct{ Failed []string }
+
+func (e *IncompleteError) Error() string {
+	return ErrIncomplete.Error() + " (" + strings.Join(e.Failed, ", ") + ")"
+}
+
+func (e *IncompleteError) Is(target error) bool { return target == ErrIncomplete }
+
+// transient are the catalog's error codes of a question GitHub did not answer;
+// the others (no release, no image …) are answers.
+var transient = map[string]bool{"rate_limit": true, "unreachable": true}
+
 // Update is one module with a newer release. From is empty when the
 // installed version is unknown (the catalog compared checksums).
 type Update struct{ Title, From, To string }
 
 // Find lists Module Manager itself (when a newer release exists) and every
 // installed catalog module the catalog marks "update". A failed list is an
-// error, never "no updates".
+// error, never "no updates"; entries GitHub did not answer for come back as an
+// *IncompleteError next to the updates that were found.
 func Find(ctx context.Context, src Source, installed string) ([]Update, error) {
 	entries, _, err := src.List(ctx)
 	if err != nil {
 		return nil, err
 	}
 	var out []Update
+	var failed []string
 	if s := src.Self(ctx, installed); s.Update {
 		out = append(out, Update{Title: "Module Manager", From: s.Installed, To: s.Latest})
+	} else if s.Error != "" {
+		failed = append(failed, "Module Manager")
 	}
 	for _, e := range entries {
+		if transient[e.ErrorCode] {
+			failed = append(failed, e.Title)
+			continue
+		}
 		if e.Installed && e.State == "update" {
 			out = append(out, Update{Title: e.Title, From: e.InstalledVersion, To: e.Version})
 		}
+	}
+	if len(failed) > 0 {
+		return out, &IncompleteError{Failed: failed}
 	}
 	return out, nil
 }
@@ -144,29 +173,20 @@ type Keeper struct {
 	sent    string
 	lastErr string
 	kick    chan struct{}
+	once    sync.Once // makes kick; Kick must not take mu, which a card round holds while it talks to the bus
 }
 
 // Kick asks Run for a check now: after an install from the catalog the card
 // must not wait for the next 12-hour check. It never blocks.
 func (k *Keeper) Kick() {
-	k.mu.Lock()
-	if k.kick == nil {
-		k.kick = make(chan struct{}, 1)
-	}
-	c := k.kick
-	k.mu.Unlock()
 	select {
-	case c <- struct{}{}:
+	case k.kicks() <- struct{}{}:
 	default: // a check is asked for already
 	}
 }
 
-func (k *Keeper) kicks() <-chan struct{} {
-	k.mu.Lock()
-	defer k.mu.Unlock()
-	if k.kick == nil {
-		k.kick = make(chan struct{}, 1)
-	}
+func (k *Keeper) kicks() chan struct{} {
+	k.once.Do(func() { k.kick = make(chan struct{}, 1) })
 	return k.kick
 }
 
@@ -179,6 +199,28 @@ func (k *Keeper) Set(list []Update) {
 		k.checked, k.shown = true, true
 	}
 	k.list = append([]Update(nil), list...)
+}
+
+// Keep is Set for an incomplete check: the modules GitHub did not answer for
+// keep what the card said about them before.
+func (k *Keeper) Keep(list []Update, failed []string) {
+	k.mu.Lock()
+	prev := append([]Update(nil), k.list...)
+	first := !k.checked
+	k.mu.Unlock()
+	if first && len(list) == 0 {
+		return // nothing known yet: no reason to withdraw a card of the previous run
+	}
+	miss := map[string]bool{}
+	for _, t := range failed {
+		miss[t] = true
+	}
+	for _, u := range prev {
+		if miss[u.Title] {
+			list = append(list, u)
+		}
+	}
+	k.Set(list)
 }
 
 // Round is one look: show, withdraw or nothing.
@@ -234,13 +276,21 @@ func Run(ctx context.Context, k *Keeper, src Source, installed string, delay, ev
 		list, err := Find(cctx, src, installed)
 		cancel()
 		next := every
-		if err != nil {
-			log.Printf("[modmanager] update check: %v", err)
-		} else {
+		var inc *IncompleteError
+		switch {
+		case err == nil:
 			k.Set(list)
 			if len(list) > 0 {
 				next = waiting
 			}
+		case errors.As(err, &inc):
+			// GitHub did not answer for some: keep what is known, ask again soon
+			log.Printf("[modmanager] update check: %v", err)
+			k.Keep(list, inc.Failed)
+			next = waiting
+		default:
+			log.Printf("[modmanager] update check: %v", err)
+			next = waiting
 		}
 		k.Round(ctx)
 		if !check.Stop() {

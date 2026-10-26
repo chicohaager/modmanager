@@ -21,12 +21,13 @@ import (
 	"github.com/chicohaager/lintux-modkit/httpx"
 	"github.com/chicohaager/lintux-modkit/watchdog"
 	"github.com/chicohaager/modmanager/internal/catalog"
+	"github.com/chicohaager/modmanager/internal/state"
 	"github.com/chicohaager/modmanager/internal/sysapps"
 	"github.com/chicohaager/modmanager/internal/updates"
 )
 
 const (
-	version            = "0.3.0"
+	version            = "0.3.1"
 	routePrefix        = "/modmanager"
 	staticDir          = "/usr/share/casaos/www/modules/modmanager"
 	defaultRuntimePath = "/var/run/casaos"
@@ -44,6 +45,15 @@ func main() {
 		runtimePath = p
 	}
 
+	// root installs and runs what lies in the state directory: never in a place
+	// others can write to (internal/state). Without it nothing is safe to do.
+	if err := state.Ensure(state.Dir); err != nil {
+		log.Fatalf("[modmanager] %v", err)
+	}
+	if taken, err := state.Migrate(state.OldDir, state.Dir); len(taken) > 0 || err != nil {
+		log.Printf("[modmanager] state moved from %s to %s: %v (the old directory stays; it can be deleted) %v", state.OldDir, state.Dir, taken, err)
+	}
+
 	mgr := sysapps.New()
 	go reconcile(mgr)
 
@@ -56,7 +66,6 @@ func main() {
 	go registerRoute(runtimePath, "http://"+listener.Addr().String())
 
 	cat := catalog.New(sysapps.ExecRunner)
-	langDir = cat.StateDir
 	// Module updates on the dashboard: the first check two minutes after the
 	// start (the gateway and /DATA come late at boot), then every 12 hours,
 	// hourly while updates wait — the catalog asks GitHub once per repository

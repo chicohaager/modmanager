@@ -3,8 +3,9 @@ Description=Module Manager for ZimaOS
 Documentation=https://github.com/chicohaager/modmanager
 After=network-online.target zimaos-gateway.service zimaos-user.service zimaos-app-management.service
 Wants=network-online.target
-# Backups of user.db and saved manifests live under /DATA/AppData/modmanager.
-RequiresMountsFor=/DATA/AppData
+# State (downloads, self-update, user.db backups, saved manifests) lives in
+# /DATA/.modmanager, root only (internal/state).
+RequiresMountsFor=/DATA
 StartLimitIntervalSec=0
 
 [Service]

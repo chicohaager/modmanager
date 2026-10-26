@@ -1,7 +1,8 @@
 'use strict';
 // Texts of the UI in English, German and French. The language follows the ZimaOS user's setting
 // (GET /v1/users/current/custom/system → data.lang, e.g. "de_DE", measured on 1.8.0) unless the
-// language menu says otherwise. Every key must exist in every language (scripts/i18n-check.mjs).
+// language menu says otherwise; without a ZimaOS setting the browser's language decides. Any other
+// language than these shows English. Every key must exist in every language (scripts/i18n-check.mjs).
 // {name} placeholders are filled by t(); th() escapes them for HTML and keeps the markup of the text.
 
 const TEXTS = {
@@ -55,8 +56,8 @@ const TEXTS = {
     'copy.ok': 'Command copied.', 'copy.fail': 'Copy failed — select the command and copy it by hand.',
     'self.update': 'Update to {v}', 'self.again': 'Click again: update to {v}', 'self.checking': 'Downloading and checking {v}…',
     'self.updating': 'Updating to {v} — Module Manager restarts; this page reloads when it answers again…',
-    'self.failed': 'The update to {v} failed; {old} is installed again. Log: /DATA/AppData/modmanager/self-update/log',
-    'self.timeout': 'No answer from Module Manager after 3 minutes. Log: /DATA/AppData/modmanager/self-update/log',
+    'self.failed': 'The update to {v} failed; {old} is installed again. Log: /DATA/.modmanager/self-update/log',
+    'self.timeout': 'No answer from Module Manager after 3 minutes. Log: /DATA/.modmanager/self-update/log',
     // codes of the API's errors (cmd/modmanager/handlers.go) and of catalog entries (error_code)
     'code.bad_repo': 'Not a GitHub repository (owner/repo or https://github.com/owner/repo).',
     'code.bad_lang': 'Unknown language (en, de or fr).',
@@ -127,8 +128,8 @@ const TEXTS = {
     'copy.ok': 'Befehl kopiert.', 'copy.fail': 'Kopieren fehlgeschlagen — markieren Sie den Befehl und kopieren Sie ihn von Hand.',
     'self.update': 'Update auf {v}', 'self.again': 'Nochmals klicken: Update auf {v}', 'self.checking': '{v} wird geladen und geprüft…',
     'self.updating': 'Update auf {v} — Module Manager startet neu; die Seite lädt neu, sobald er wieder antwortet…',
-    'self.failed': 'Das Update auf {v} ist fehlgeschlagen; {old} ist wieder installiert. Protokoll: /DATA/AppData/modmanager/self-update/log',
-    'self.timeout': 'Keine Antwort von Module Manager nach 3 Minuten. Protokoll: /DATA/AppData/modmanager/self-update/log',
+    'self.failed': 'Das Update auf {v} ist fehlgeschlagen; {old} ist wieder installiert. Protokoll: /DATA/.modmanager/self-update/log',
+    'self.timeout': 'Keine Antwort von Module Manager nach 3 Minuten. Protokoll: /DATA/.modmanager/self-update/log',
     'code.bad_repo': 'Kein GitHub-Repository (besitzer/repo oder https://github.com/besitzer/repo).',
     'code.bad_lang': 'Unbekannte Sprache (en, de oder fr).',
     'code.unknown_entry': 'Unbekannter Katalogeintrag.',
@@ -198,8 +199,8 @@ const TEXTS = {
     'copy.ok': 'Commande copiée.', 'copy.fail': 'Échec de la copie — sélectionnez la commande et copiez-la à la main.',
     'self.update': 'Mettre à jour vers {v}', 'self.again': 'Cliquez à nouveau : mise à jour vers {v}', 'self.checking': 'Téléchargement et vérification de {v}…',
     'self.updating': 'Mise à jour vers {v} — Module Manager redémarre ; la page se recharge dès qu’il répond à nouveau…',
-    'self.failed': 'La mise à jour vers {v} a échoué ; {old} est de nouveau installé. Journal : /DATA/AppData/modmanager/self-update/log',
-    'self.timeout': 'Pas de réponse de Module Manager après 3 minutes. Journal : /DATA/AppData/modmanager/self-update/log',
+    'self.failed': 'La mise à jour vers {v} a échoué ; {old} est de nouveau installé. Journal : /DATA/.modmanager/self-update/log',
+    'self.timeout': 'Pas de réponse de Module Manager après 3 minutes. Journal : /DATA/.modmanager/self-update/log',
     'code.bad_repo': 'Pas un dépôt GitHub (propriétaire/dépôt ou https://github.com/propriétaire/dépôt).',
     'code.bad_lang': 'Langue inconnue (en, de ou fr).',
     'code.unknown_entry': 'Entrée de catalogue inconnue.',

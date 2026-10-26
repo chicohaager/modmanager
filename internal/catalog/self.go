@@ -46,23 +46,38 @@ func (c *Catalog) selfDir() string { return filepath.Join(c.StateDir, "self-upda
 // selfScript runs in a transient unit (systemd-run), outside Module Manager's own
 // service: `zpkg remove modmanager` takes /usr/bin/modmanager and its unit away.
 // zpkg starts the module's service again on install (ZimaOS 1.8.0, KB §79.8).
-// A failed install of the new image puts the previous one back.
+// A failed install of the new image puts the previous one back. A failed remove
+// that left the installed image in place stops there (nothing is installed over
+// it); the last line of the log is the result: ok, remove-failed, rolled-back or
+// rollback-failed.
 const selfScript = `#!/bin/sh
 # Written by Module Manager: replaces itself with the new image, rolls back on failure.
 D=%q
+E=%q
 exec >"$D/log" 2>&1
 sleep 2
 echo "remove $(date)"
-zpkg remove modmanager || echo "remove failed (continuing)"
+if ! zpkg remove modmanager; then
+  if [ -e "$E/modmanager.raw" ]; then
+    echo "remove failed, the installed version stays"
+    echo "result remove-failed"
+    exit 1
+  fi
+  echo "remove failed, but the image is gone (continuing)"
+fi
 if zpkg install "$D/new/modmanager.raw"; then
   systemctl daemon-reload
   rm -f "$D/new/modmanager.raw"  # zpkg copied it to /var/lib/extensions; previous/ stays as the way back
   echo "result ok"
 else
   echo "install of the new image failed, rolling back"
-  zpkg install "$D/previous/modmanager.raw"
-  systemctl daemon-reload
-  echo "result rolled-back"
+  if zpkg install "$D/previous/modmanager.raw"; then
+    systemctl daemon-reload
+    echo "result rolled-back"
+  else
+    echo "result rollback-failed: Module Manager is not installed; install $D/previous/modmanager.raw by hand (zpkg install)"
+    exit 1
+  fi
 fi
 `
 
@@ -109,7 +124,7 @@ func (c *Catalog) SelfUpdate(ctx context.Context, installed string) (string, err
 		return "", fmt.Errorf("no copy of the installed image for a rollback: %w", err)
 	}
 	script := filepath.Join(dir, "run.sh")
-	if err := os.WriteFile(script, []byte(fmt.Sprintf(selfScript, dir)), 0o700); err != nil {
+	if err := os.WriteFile(script, []byte(fmt.Sprintf(selfScript, dir, c.ExtDir)), 0o700); err != nil {
 		return "", err
 	}
 	_ = os.Remove(filepath.Join(dir, "log"))

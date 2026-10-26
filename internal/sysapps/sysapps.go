@@ -36,6 +36,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/chicohaager/modmanager/internal/state"
 )
 
 // Kind is the mechanism an app is hidden with.
@@ -128,7 +130,7 @@ type Paths struct {
 	ModulesDir string // /usr/share/casaos/modules (merged view)
 	EtcExt     string // /etc/extensions
 	VarExt     string // /var/lib/extensions
-	StateDir   string // /DATA/AppData/modmanager
+	StateDir   string // state.Dir, root only
 	UserDB     string // /var/lib/casaos/db/user.db
 	UnitDir    string // /usr/lib/systemd/system (to find sibling units)
 	OSRelease  string // /etc/os-release
@@ -141,7 +143,7 @@ func DefaultPaths() Paths {
 		ModulesDir: "/usr/share/casaos/modules",
 		EtcExt:     "/etc/extensions",
 		VarExt:     "/var/lib/extensions",
-		StateDir:   "/DATA/AppData/modmanager",
+		StateDir:   state.Dir,
 		UserDB:     "/var/lib/casaos/db/user.db",
 		UnitDir:    "/usr/lib/systemd/system",
 		OSRelease:  "/etc/os-release",

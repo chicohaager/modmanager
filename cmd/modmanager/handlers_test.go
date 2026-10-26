@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/chicohaager/modmanager/internal/catalog"
+	"github.com/chicohaager/modmanager/internal/state"
 	"github.com/chicohaager/modmanager/internal/sysapps"
 	"github.com/chicohaager/modmanager/internal/updates"
 )
@@ -287,5 +288,22 @@ func TestACatalogChangeAsksForAnUpdateCheck(t *testing.T) {
 	_ = do(t, newMux(&fakeSvc{}, &fakeCat{err: catalog.ErrNotNewer}, requireToken), http.MethodPost, "/modmanager/catalog/install", `{"id":"gh:a/b"}`, nil)
 	if n != 1 {
 		t.Fatalf("a failed install asked for a check: %d", n)
+	}
+}
+
+// Every part keeps its state in the root-only directory, none in /DATA/AppData
+// (0777 without the sticky bit on ZimaOS 1.8, internal/state).
+func TestEveryPartUsesTheRootOnlyStateDir(t *testing.T) {
+	if got := catalog.New(nil).StateDir; got != state.Dir {
+		t.Errorf("catalog: %s", got)
+	}
+	if got := sysapps.DefaultPaths().StateDir; got != state.Dir {
+		t.Errorf("sysapps: %s", got)
+	}
+	if defaultLangDir != state.Dir {
+		t.Errorf("ui-lang: %s", defaultLangDir)
+	}
+	if state.Dir != "/DATA/.modmanager" || state.OldDir != "/DATA/AppData/modmanager" {
+		t.Errorf("dirs %s %s", state.Dir, state.OldDir)
 	}
 }
