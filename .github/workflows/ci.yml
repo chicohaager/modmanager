@@ -9,7 +9,8 @@
 #
 # go.mod replaces lintux-modkit with ../lintux-modkit, so every job checks out both
 # repositories side by side (without it: "replacement directory ../lintux-modkit does
-# not exist", measured 2026-10-23).
+# not exist", measured 2026-10-23). The checkout is pinned to a lintux-modkit tag, so
+# CI builds against the version this release was tested with, not whatever main is now.
 
 name: CI
 
@@ -34,7 +35,7 @@ jobs:
       - uses: actions/checkout@v7
         with: { path: zima-modmanager }
       - uses: actions/checkout@v7
-        with: { repository: chicohaager/lintux-modkit, path: lintux-modkit }
+        with: { repository: chicohaager/lintux-modkit, ref: v0.1.0, path: lintux-modkit }
       - uses: actions/setup-go@v7
         with: { go-version-file: zima-modmanager/go.mod, cache: false }
       - run: gofmt -l . | tee /tmp/fmt && [ ! -s /tmp/fmt ]
@@ -49,7 +50,7 @@ jobs:
       - uses: actions/checkout@v7
         with: { path: zima-modmanager }
       - uses: actions/checkout@v7
-        with: { repository: chicohaager/lintux-modkit, path: lintux-modkit }
+        with: { repository: chicohaager/lintux-modkit, ref: v0.1.0, path: lintux-modkit }
       - uses: actions/setup-go@v7
         with: { go-version-file: zima-modmanager/go.mod, cache: false }
       - run: go test -race -count=1 ./...
@@ -61,7 +62,7 @@ jobs:
       - uses: actions/checkout@v7
         with: { path: zima-modmanager }
       - uses: actions/checkout@v7
-        with: { repository: chicohaager/lintux-modkit, path: lintux-modkit }
+        with: { repository: chicohaager/lintux-modkit, ref: v0.1.0, path: lintux-modkit }
       - uses: actions/setup-go@v7
         with: { go-version-file: zima-modmanager/go.mod, cache: false }
       - run: go install golang.org/x/vuln/cmd/govulncheck@latest
@@ -77,7 +78,7 @@ jobs:
       - uses: actions/checkout@v7
         with: { path: zima-modmanager }
       - uses: actions/checkout@v7
-        with: { repository: chicohaager/lintux-modkit, path: lintux-modkit }
+        with: { repository: chicohaager/lintux-modkit, ref: v0.1.0, path: lintux-modkit }
       - uses: actions/setup-go@v7
         with: { go-version-file: zima-modmanager/go.mod, cache: false }
       - run: sudo apt-get update && sudo apt-get install -y squashfs-tools
