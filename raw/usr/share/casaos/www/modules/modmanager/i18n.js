@@ -59,6 +59,7 @@ const TEXTS = {
     'self.timeout': 'No answer from Module Manager after 3 minutes. Log: /DATA/AppData/modmanager/self-update/log',
     // codes of the API's errors (cmd/modmanager/handlers.go) and of catalog entries (error_code)
     'code.bad_repo': 'Not a GitHub repository (owner/repo or https://github.com/owner/repo).',
+    'code.bad_lang': 'Unknown language (en or de).',
     'code.unknown_entry': 'Unknown catalog entry.',
     'code.no_image': 'The latest release has no sysext image (.raw) for this CPU.',
     'code.no_checksum': 'The release ships no sha256 checksum; it cannot be installed from here.',
@@ -129,6 +130,7 @@ const TEXTS = {
     'self.failed': 'Das Update auf {v} ist fehlgeschlagen; {old} ist wieder installiert. Protokoll: /DATA/AppData/modmanager/self-update/log',
     'self.timeout': 'Keine Antwort von Module Manager nach 3 Minuten. Protokoll: /DATA/AppData/modmanager/self-update/log',
     'code.bad_repo': 'Kein GitHub-Repository (besitzer/repo oder https://github.com/besitzer/repo).',
+    'code.bad_lang': 'Unbekannte Sprache (en oder de).',
     'code.unknown_entry': 'Unbekannter Katalogeintrag.',
     'code.no_image': 'Das neueste Release hat kein sysext-Image (.raw) für diese CPU.',
     'code.no_checksum': 'Das Release liefert keine sha256-Prüfsumme; von hier aus ist es nicht installierbar.',

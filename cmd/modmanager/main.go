@@ -1,7 +1,8 @@
 // Command modmanager is the backend of the Module Manager for ZimaOS: it
 // hides and restores the built-in apps (internal/sysapps), serves the UI
 // and its JSON API behind the ZimaOS gateway and installs its own boot
-// watchdog units.
+// watchdog units. It also puts a card on the dashboard while module updates
+// wait (internal/updates).
 package main
 
 import (
@@ -21,6 +22,7 @@ import (
 	"github.com/chicohaager/lintux-modkit/watchdog"
 	"github.com/chicohaager/modmanager/internal/catalog"
 	"github.com/chicohaager/modmanager/internal/sysapps"
+	"github.com/chicohaager/modmanager/internal/updates"
 )
 
 const (
@@ -53,8 +55,19 @@ func main() {
 	log.Printf("[modmanager] listening on http://%s", listener.Addr())
 	go registerRoute(runtimePath, "http://"+listener.Addr().String())
 
+	cat := catalog.New(sysapps.ExecRunner)
+	langDir = cat.StateDir
+	// Module updates on the dashboard: the first check two minutes after the
+	// start (the gateway and /DATA come late at boot), then every 12 hours —
+	// the catalog asks GitHub once per repository (60 anonymous calls an hour).
+	card := &updates.Keeper{
+		Notifier: updates.Notifier{BusURLFile: updates.DefaultBusURLFile},
+		Lang:     func() string { return updates.ReadLang(langDir) },
+	}
+	go updates.Run(context.Background(), card, cat, version, 2*time.Minute, 12*time.Hour)
+
 	srv := &http.Server{
-		Handler:           withStatic(httpx.CSRF(newMux(mgr, catalog.New(sysapps.ExecRunner), newVerifier(runtimePath).Middleware))),
+		Handler:           withStatic(httpx.CSRF(newMux(mgr, cat, newVerifier(runtimePath).Middleware))),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go shutdownOnSignal(srv)
