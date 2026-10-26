@@ -708,7 +708,7 @@ func TestHealthWinsOverExtensionRelease(t *testing.T) {
 // without login at /<name>/health, <name> being the module name from the
 // repository zimaos-<name>-sysext (measured on .184, 2026-10-23).
 func TestSysextModulePresetsReadTheirHealthRoute(t *testing.T) {
-	want := map[string]bool{"admintools": false, "wireguard": false, "nebula": false, "restic": false}
+	want := map[string]bool{"admintools": false, "wireguard": false, "nebula": false, "restic": false, "pangolin": false}
 	for _, p := range Presets {
 		name, ok := strings.CutPrefix(p.Repo, "chicohaager/zimaos-")
 		if !ok || !strings.HasSuffix(name, "-sysext") {
