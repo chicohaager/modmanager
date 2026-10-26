@@ -10,6 +10,7 @@ import (
 
 	"github.com/chicohaager/lintux-modkit/httpx"
 	"github.com/chicohaager/modmanager/internal/catalog"
+	"github.com/chicohaager/modmanager/internal/state"
 	"github.com/chicohaager/modmanager/internal/sysapps"
 	"github.com/chicohaager/modmanager/internal/updates"
 )
@@ -289,7 +290,9 @@ func writeCatalogError(w http.ResponseWriter, err error) {
 var onCatalogChange = func() {}
 
 // langDir holds the page's language for the dashboard card (internal/updates).
-var langDir = "/DATA/AppData/modmanager"
+var langDir = defaultLangDir
+
+const defaultLangDir = state.Dir
 
 // uiLangHandler stores the language the page shows ("en", "de" or "fr"): the backend
 // has no user token to read the ZimaOS setting itself.

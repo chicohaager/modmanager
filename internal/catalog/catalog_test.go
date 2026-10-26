@@ -124,6 +124,8 @@ type recorder struct {
 	// lists answers `unsquashfs -lc <file>` by the file's content: the image
 	// strings in these tests stand for squashfs images.
 	lists map[string]string
+	// failInstall makes `zpkg install` of an image with this content fail.
+	failInstall map[string]bool
 }
 
 func (r *recorder) run(_ context.Context, name string, args ...string) ([]byte, error) {
@@ -143,7 +145,14 @@ func (r *recorder) run(_ context.Context, name string, args ...string) ([]byte, 
 		if err != nil {
 			return nil, fmt.Errorf("zpkg: %w", err)
 		}
+		if r.failInstall[string(b)] {
+			return []byte("install failed"), errors.New("exit status 1")
+		}
 		return nil, os.WriteFile(filepath.Join(r.ext, filepath.Base(args[1])), b, 0o644)
+	}
+	if name == "zpkg" && len(args) == 2 && args[0] == "remove" {
+		// as the real one: the module's image leaves /var/lib/extensions
+		_ = os.Remove(filepath.Join(r.ext, args[1]+".raw"))
 	}
 	return nil, nil
 }

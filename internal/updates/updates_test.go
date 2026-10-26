@@ -40,9 +40,10 @@ func TestFindTakesInstalledModulesWithANewerReleaseAndModuleManagerItself(t *tes
 		},
 		self: catalog.SelfStatus{Installed: "0.3.0", Latest: "v0.3.1", Update: true},
 	}
+	// "Broken" could not be asked (rate limit): the list is incomplete, not "no update there"
 	got, err := Find(context.Background(), src, "0.3.0")
-	if err != nil {
-		t.Fatal(err)
+	if !errors.Is(err, ErrIncomplete) {
+		t.Fatalf("err %v, want ErrIncomplete for the entry GitHub did not answer", err)
 	}
 	want := []Update{
 		{Title: "Module Manager", From: "0.3.0", To: "v0.3.1"},
@@ -193,12 +194,16 @@ type countingSource struct {
 	mu    sync.Mutex
 	n     int
 	state string
+	code  string // an error code: the entry as the catalog lists it when GitHub did not answer
 }
 
 func (c *countingSource) List(context.Context) ([]catalog.Entry, []string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.n++
+	if c.code != "" {
+		return []catalog.Entry{{Title: "Nebula", Error: "GitHub", ErrorCode: c.code}}, nil, nil
+	}
 	return []catalog.Entry{{Title: "Nebula", Installed: true, State: c.state, InstalledVersion: "1.0.9", Version: "v1.1.0"}}, nil, nil
 }
 func (c *countingSource) Self(context.Context, string) catalog.SelfStatus {
@@ -256,5 +261,67 @@ func TestWhileUpdatesWaitTheCheckRunsSooner(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	if src.checks() != n {
 		t.Fatalf("with nothing waiting the check kept running at the short interval: %d → %d", n, src.checks())
+	}
+}
+
+// GitHub not answering (offline at boot, rate limit) is not "no updates": the card
+// stays as it was and the check comes back at the short interval, not in 12 hours.
+func TestAnUnansweredCheckKeepsTheCardAndComesBackSooner(t *testing.T) {
+	b, f := newBus(t)
+	src := &countingSource{state: "update"}
+	k := &Keeper{Notifier: Notifier{BusURLFile: f}, Lang: func() string { return "en" }}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go Run(ctx, k, src, "0.3.0", 0, time.Hour, 20*time.Millisecond)
+	waitFor(t, func() bool { return src.checks() >= 1 })
+	src.mu.Lock()
+	src.code = "unreachable"
+	src.mu.Unlock()
+	n := src.checks()
+	waitFor(t, func() bool { return src.checks() >= n+3 })
+	b.mu.Lock()
+	for _, e := range b.events {
+		if e == "ysk:card:delete" {
+			b.mu.Unlock()
+			t.Fatalf("card withdrawn while GitHub did not answer: %v", b.events)
+		}
+	}
+	b.mu.Unlock()
+	src.mu.Lock()
+	src.code, src.state = "", "current"
+	src.mu.Unlock()
+	waitFor(t, func() bool {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return len(b.events) > 0 && b.events[len(b.events)-1] == "ysk:card:delete"
+	})
+}
+
+// Kick is called from the install handler: it must not wait for a card round that
+// hangs on a slow message bus (up to the bus timeout).
+func TestKickDoesNotWaitForTheBus(t *testing.T) {
+	release := make(chan struct{})
+	got := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case got <- struct{}{}:
+		default:
+		}
+		<-release
+	}))
+	defer srv.Close()
+	defer close(release)
+	f := filepath.Join(t.TempDir(), "message-bus.url")
+	if err := os.WriteFile(f, []byte(srv.URL+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	k := &Keeper{Notifier: Notifier{BusURLFile: f}, Lang: func() string { return "en" }}
+	k.Set([]Update{{Title: "Nebula", From: "1.0.9", To: "v1.1.0"}})
+	go k.Round(context.Background())
+	<-got
+	start := time.Now()
+	k.Kick()
+	if d := time.Since(start); d > 200*time.Millisecond {
+		t.Fatalf("Kick waited %v for the card round", d)
 	}
 }

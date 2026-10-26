@@ -77,7 +77,11 @@ func TestSelfUpdateScriptRollsBack(t *testing.T) {
 		name, failOn, result, installedLast string
 	}{
 		{"new installs", "", "result ok", "new/modmanager.raw"},
-		{"new fails", "new/modmanager.raw", "result rolled-back", "previous/modmanager.raw"},
+		{"new fails", "*new/modmanager.raw*", "result rolled-back", "previous/modmanager.raw"},
+		// remove failed: the installed version stays, nothing is installed over it
+		{"remove fails", `*"remove modmanager"*`, "result remove-failed", ""},
+		// the way back failed too: the log must not claim a rollback
+		{"rollback fails", "*new/modmanager.raw*|*previous/modmanager.raw*", "result rollback-failed", "previous/modmanager.raw"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c, _, _ := selfRelease(t, "v0.3.0")
@@ -88,15 +92,18 @@ func TestSelfUpdateScriptRollsBack(t *testing.T) {
 			log := filepath.Join(bin, "calls")
 			fake := "#!/bin/sh\necho \"$(basename \"$0\") $*\" >> " + log + "\n"
 			if tc.failOn != "" {
-				fake += "case \"$*\" in *" + tc.failOn + "*) exit 1 ;; esac\n"
+				fake += "case \"$*\" in " + tc.failOn + ") exit 1 ;; esac\n"
 			}
 			for _, n := range []string{"zpkg", "systemctl", "sleep"} {
 				must(t, os.WriteFile(filepath.Join(bin, n), []byte(fake), 0o755))
 			}
 			cmd := exec.Command("/bin/sh", filepath.Join(dir, "run.sh"))
 			cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
-			if out, err := cmd.CombinedOutput(); err != nil {
-				t.Fatalf("script: %v %s", err, out)
+			// the transient unit fails (and shows as failed) when Module Manager may be gone
+			sout, err := cmd.CombinedOutput()
+			wantFail := tc.result == "result remove-failed" || tc.result == "result rollback-failed"
+			if (err != nil) != wantFail {
+				t.Fatalf("script: err %v (want failure %v) %s", err, wantFail, sout)
 			}
 			out, _ := os.ReadFile(filepath.Join(dir, "log"))
 			calls, _ := os.ReadFile(log)
@@ -110,7 +117,11 @@ func TestSelfUpdateScriptRollsBack(t *testing.T) {
 					lastInstall = l
 				}
 			}
-			if !strings.HasSuffix(lastInstall, tc.installedLast) || !strings.Contains(string(calls), "zpkg remove modmanager") {
+			if tc.installedLast == "" {
+				if lastInstall != "" {
+					t.Fatalf("calls:\n%s\nwant no install after a failed remove", calls)
+				}
+			} else if !strings.HasSuffix(lastInstall, tc.installedLast) || !strings.Contains(string(calls), "zpkg remove modmanager") {
 				t.Fatalf("calls:\n%s\nwant remove and last install of %s", calls, tc.installedLast)
 			}
 			// zpkg copied the new image to /var/lib/extensions (measured .184): after success the staged copy goes,
