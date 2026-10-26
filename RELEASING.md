@@ -20,7 +20,16 @@
 
    Do not upload the arch-less `dist/modmanager.raw`: when a release has no image for the host's CPU, the catalog takes an arch-less one (`internal/catalog/catalog.go`, `pick`), so an arm64 host would install the amd64 image. Add `dist/modmanager-arm64.raw` (+ `.sha256`) only after it was tested on arm64.
 
-3. **Check the release** against the host that runs it:
+3. **Check that the release comes back from its tag** (same bytes, built with the lintux-modkit commit stamped in the image):
+
+   ```sh
+   ASSET_FILE=dist/modmanager-amd64.raw ../lintux-modkit/tools/check-release.sh . <commit> modmanager   # before uploading
+   ../lintux-modkit/tools/check-release.sh . v<version> modmanager                                      # after the release
+   ```
+
+   It must end with `reproduced: …`. On 2026-10-26 a rebuild from the commit gave other bytes than the tested image, because `../lintux-modkit` had moved on.
+
+4. **Check the release** against the host that runs it:
 
    ```sh
    python3 scripts/catalog-e2e.py --url http://<zimaos-host> --user <name> --password-file <file>
@@ -28,4 +37,4 @@
 
    It must end with `✓ … release image picked, installed version current` and leave the catalog as it was.
 
-4. **Run the README install path as written**, line by line, in the ZimaOS terminal of a host (after `sudo zpkg remove modmanager`), then check `/modmanager/health` for the new version. The catalog check above does not cover it: on 22.10.2026 the README told users to install the downloaded file without renaming it, and `zpkg` refused it.
+5. **Run the README install path as written**, line by line, in the ZimaOS terminal of a host (after `sudo zpkg remove modmanager`), then check `/modmanager/health` for the new version. The catalog check above does not cover it: on 22.10.2026 the README told users to install the downloaded file without renaming it, and `zpkg` refused it.
