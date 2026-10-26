@@ -2,6 +2,20 @@
 
 Releases: https://github.com/chicohaager/modmanager/releases. Every release is amd64 only and tested on a ZimaBoard 2 with ZimaOS 1.8.0.
 
+## 0.3.1 — 2026-10-26
+
+Security and robustness fixes from a full code and security review.
+
+- **State moves to `/DATA/.modmanager`** (0700, root only). Up to 0.3.0 it was `/DATA/AppData/modmanager`, and `/DATA/AppData` is writable by everyone on ZimaOS 1.8 (0777 without the sticky bit; the share of `/DATA` is writable over SMB): another user could swap a download for their own image between the checksum and `zpkg install`, or plant a symlink root writes through. Module Manager refuses to start when the state directory is a symlink, belongs to someone else or sits in a directory others can write to. The first start copies the added repositories, the language, the saved manifests of hidden apps and the `user.db` backups over (plain root-owned files only); the old directory stays.
+- **Session tokens are checked against the user service's own keys** (lintux-modkit v0.1.1): the JWKS address comes from `user-service.url`, which only root writes, not from the gateway's route table — a process without root can change that table without login (measured on ZimaOS 1.8.0).
+- A failed module update installs the previous version again (it used to leave the module removed).
+- An arm64 host no longer takes the arch-less `name.raw` of a release that also ships `name-amd64.raw`: lintux-modkit's build writes it as a copy of the amd64 image.
+- Self-update: a failed `zpkg remove` stops before anything is installed over the running version, and a failed way back ends with `result rollback-failed` in the log instead of claiming a rollback.
+- A catalog request cut short (closed tab, timeout) no longer leaves "GitHub not reachable" in the cache for 10 minutes.
+- The dashboard card stays when GitHub does not answer the update check (offline, rate limit), and the check comes back after an hour instead of 12.
+- An install no longer waits for a slow ZimaOS message bus (up to 5 s).
+- The local build refuses a lintux-modkit checkout other than the pinned one (`lintux-modkit.ref`, the same tag CI checks out); govulncheck is pinned in CI.
+
 ## 0.3.0 — 2026-10-26
 
 - French UI: every text also in French (menu: Français; auto picks it when the ZimaOS user's language, or without one the browser's, is French), the dashboard card too; the i18n check now fails when any language lacks a text or the menu lacks a language.
