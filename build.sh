@@ -9,6 +9,9 @@ VERSION=$(sed -n 's/^\s*version\s*=\s*"\(.*\)".*/\1/p' cmd/modmanager/main.go)
 [ -n "$VERSION" ] || { echo "version not found in cmd/modmanager/main.go" >&2; exit 1; }
 WEB=raw/usr/share/casaos/www/modules/modmanager
 echo "modmanager v$VERSION linux/$ARCH"
+# the README header names the version a reader gets; it stayed at 0.3.0 for the 0.3.1 release (2026-10-26)
+grep -q "^\*\*Version $VERSION\*\*" README.md \
+  || { echo "README.md header: '$(grep -m1 -o '^\*\*Version [^*]*' README.md)', code: $VERSION" >&2; exit 1; }
 
 sh scripts/modkit-check.sh     # the lintux-modkit commit of lintux-modkit.ref, no local changes
 go vet ./...
