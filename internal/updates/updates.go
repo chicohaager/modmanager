@@ -305,9 +305,11 @@ func (k *Keeper) Round(ctx context.Context) {
 	}
 }
 
-// Run checks for updates every check interval (the first time after delay,
-// and at once on Kick) and runs a card round every minute, until ctx ends.
-func Run(ctx context.Context, k *Keeper, src Source, installed string, delay, every time.Duration) {
+// Run checks for updates (the first time after delay, at once on Kick) and
+// runs a card round every minute, until ctx ends. The next check comes after
+// every, or after waiting while the card names updates: an update installed
+// past the catalog (a module's own installer, zpkg by hand) sends no Kick.
+func Run(ctx context.Context, k *Keeper, src Source, installed string, delay, every, waiting time.Duration) {
 	check := time.NewTimer(delay)
 	defer check.Stop()
 	round := time.NewTicker(time.Minute)
@@ -317,12 +319,23 @@ func Run(ctx context.Context, k *Keeper, src Source, installed string, delay, ev
 		cctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		list, err := Find(cctx, src, installed)
 		cancel()
+		next := every
 		if err != nil {
 			log.Printf("[modmanager] update check: %v", err)
 		} else {
 			k.Set(list)
+			if len(list) > 0 {
+				next = waiting
+			}
 		}
 		k.Round(ctx)
+		if !check.Stop() {
+			select {
+			case <-check.C:
+			default:
+			}
+		}
+		check.Reset(next)
 	}
 	for {
 		select {
@@ -330,7 +343,6 @@ func Run(ctx context.Context, k *Keeper, src Source, installed string, delay, ev
 			return
 		case <-check.C:
 			look()
-			check.Reset(every)
 		case <-kick:
 			look()
 		case <-round.C:
