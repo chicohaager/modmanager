@@ -65,6 +65,7 @@ func main() {
 		Lang:     func() string { return updates.ReadLang(langDir) },
 	}
 	go updates.Run(context.Background(), card, cat, version, 2*time.Minute, 12*time.Hour)
+	onCatalogChange = card.Kick
 
 	srv := &http.Server{
 		Handler:           withStatic(httpx.CSRF(newMux(mgr, cat, newVerifier(runtimePath).Middleware))),
