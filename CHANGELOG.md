@@ -2,10 +2,11 @@
 
 Releases: https://github.com/chicohaager/modmanager/releases. Every release is amd64 only and tested on a ZimaBoard 2 with ZimaOS 1.8.0.
 
-## 0.3.2 — unreleased
+## 0.3.2 — 2026-10-26
 
 - Prometheus Exporter in the catalog (`chicohaager/zimaos-node-exporter-sysext` v1.0.0: `node_exporter` and `smartctl_exporter` on the host for Prometheus and Grafana, installed version from `/node-exporter/health`).
 - `build.sh` stops when the README header names another version than the code.
+- Built against lintux-modkit v0.1.2 (image modes 755/644 whatever the umask, so the release tag rebuilds to the same bytes; `tools/check-release.sh`).
 
 ## 0.3.1 — 2026-10-26
 
