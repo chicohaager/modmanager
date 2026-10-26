@@ -287,10 +287,9 @@ func (k *Keeper) Round(ctx context.Context) {
 	case k.shown:
 		if err = k.Notifier.Withdraw(ctx); err == nil {
 			k.shown = false
-			if k.sent != "" {
-				log.Printf("[modmanager] dashboard card withdrawn: no module updates")
-				k.sent = ""
-			}
+			k.sent = ""
+			// also after a restart, when the card may stem from the previous run
+			log.Printf("[modmanager] dashboard card withdrawn: no module updates")
 		}
 	}
 	msg := ""
