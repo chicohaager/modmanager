@@ -1,0 +1,10 @@
+# Exemptions for check-public-data.py — decided once, recorded here (27.10.2026).
+# Every entry is path-scoped (<path>:<value>).
+#
+# Copyright line of the maintainer.
+LICENSE:Kuehn
+# systemd template unit names in test fixtures, not e-mail addresses.
+internal/catalog/catalog_test.go:cron-job@nightly.service
+internal/catalog/robust_test.go:cron-job@daily.service
+# Reserved test domain (RFC 2606) in the modkit-check test.
+scripts/test-modkit-check.sh:t@example.invalid
