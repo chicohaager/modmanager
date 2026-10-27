@@ -163,7 +163,26 @@ func (r *recorder) run(_ context.Context, name string, args ...string) ([]byte, 
 	if name == "systemctl" && len(args) == 5 && args[0] == "list-units" {
 		return []byte(r.instances[args[4]]), nil
 	}
+	if name == "zpkg" && len(args) == 3 && args[0] == "install" && args[1] == "--force" {
+		// as the real one (ZimaOS 1.8.0): replaces the image of a module zpkg knows, else fails
+		dst := filepath.Join(r.ext, filepath.Base(args[2]))
+		if _, err := os.Stat(dst); err != nil {
+			return []byte("Failed to install module: module not installed"), errors.New("exit status 1")
+		}
+		b, err := os.ReadFile(args[2])
+		if err != nil {
+			return nil, fmt.Errorf("zpkg: %w", err)
+		}
+		if r.failInstall[string(b)] {
+			return []byte("install failed"), errors.New("exit status 1")
+		}
+		return nil, os.WriteFile(dst, b, 0o644)
+	}
 	if name == "zpkg" && len(args) == 2 && args[0] == "install" && strings.HasSuffix(args[1], ".raw") {
+		// zpkg refuses a second image of the same name (without --force)
+		if _, err := os.Stat(filepath.Join(r.ext, filepath.Base(args[1]))); err == nil {
+			return []byte("module already installed"), errors.New("exit status 1")
+		}
 		b, err := os.ReadFile(args[1])
 		if err != nil {
 			return nil, fmt.Errorf("zpkg: %w", err)
@@ -274,7 +293,9 @@ func TestInstallVerifiesRenamesAndInstalls(t *testing.T) {
 	must(t, os.WriteFile(filepath.Join(rec.ext, "cron.raw"), []byte("squashfs-cron-v1"), 0o644))
 	must(t, c.Install(context.Background(), "gh:lintux/cron"))
 	dl := filepath.Join(c.StateDir, "downloads", "cron.raw")
-	want := []string{"unsquashfs -lc " + dl, "unsquashfs -lc " + filepath.Join(rec.ext, "cron.raw"), "zpkg remove cron", "zpkg install " + dl, "systemctl daemon-reload"}
+	prev := filepath.Join(c.StateDir, "downloads", "previous", "cron.raw")
+	want := []string{"unsquashfs -lc " + dl, "unsquashfs -lc " + filepath.Join(rec.ext, "cron.raw"), "unsquashfs -lc " + prev,
+		"zpkg install --force " + dl, "systemctl daemon-reload", "unsquashfs -lc " + filepath.Join(rec.ext, "cron.raw")}
 	if strings.Join(rec.cmds, "|") != strings.Join(want, "|") {
 		t.Fatalf("commands %v, want %v", rec.cmds, want)
 	}
