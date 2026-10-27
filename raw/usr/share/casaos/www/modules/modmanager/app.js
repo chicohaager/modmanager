@@ -269,6 +269,17 @@ async function loadModules() {
     return `<tr><td class="mono">${esc(m.name)}</td><td>${esc(ti)}</td><td class="mono">${svcs}</td><td>${esc(when)}</td><td>${src}</td></tr>`;
   });
   $('#mods').innerHTML = rows.join('') || `<tr><td colspan="5" class="loading">${esc(t('mods.none'))}</td></tr>`;
+  loadLoops().catch(() => {}); // a missing count is no error of the module list
+}
+
+// Loop devices old system-extension states hold (GET /modmanager/loops, internal/loops):
+// every refresh adds a state while processes of the one before still run; a reboot frees them.
+async function loadLoops() {
+  const s = await api(`${API_BASE}/loops`);
+  const el = $('#loops-info');
+  el.textContent = t(s.old_states >= s.threshold ? 'loops.many' : 'loops.info', { loops: s.loops, old: s.old_states });
+  el.classList.toggle('warn-note', s.old_states >= s.threshold);
+  el.hidden = false;
 }
 
 // ---------- catalog ----------

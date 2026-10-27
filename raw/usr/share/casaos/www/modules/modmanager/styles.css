@@ -255,6 +255,8 @@ tr:last-child td { border-bottom: none; }
   border-radius: 8px; padding: 6px 10px;
 }
 .empty { color: var(--text-muted); font-size: 13px; padding: 4px 2px; }
+/* loop devices of old system states above the threshold (app.js loadLoops) */
+.panel-hint.warn-note { color: var(--warn); background: var(--warn-tint); border-color: var(--warn); }
 
 /* ---------- dialog ---------- */
 .modal-overlay {
