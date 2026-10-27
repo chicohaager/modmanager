@@ -71,14 +71,20 @@ func (l *Log) clock() time.Time {
 	return time.Now()
 }
 
-// Start begins a new job and forgets the previous one.
+// Start begins a new job and forgets the previous one. The id is the start time in
+// milliseconds (at least one more than the last): a page that stayed open across a
+// restart of Module Manager (self-update, update by hand) knows ids of the old process
+// and shows only newer ones — a counter from 1 would be hidden there (measured on .184,
+// 2026-10-27: the panel stayed empty after a restart).
 func (l *Log) Start(action, target string) {
 	if l == nil {
 		return
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.job = Snapshot{ID: l.job.ID + 1, Action: action, Target: target, Running: true, Started: l.clock(), Rev: l.job.Rev + 1}
+	now := l.clock()
+	id := max(now.UnixMilli(), l.job.ID+1)
+	l.job = Snapshot{ID: id, Action: action, Target: target, Running: true, Started: now, Rev: l.job.Rev + 1}
 }
 
 // Finish ends the job with its result; a failed one gets the error as its last line.
