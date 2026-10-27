@@ -431,12 +431,15 @@ function renderTerm() {
   if (j && j.dropped) rows.unshift(`<span class="t">${esc(t('term.dropped', { n: j.dropped }))}</span>`);
   out.innerHTML = rows.join('\n');
   if (atEnd) out.scrollTop = out.scrollHeight;
-  const running = !j || j.running || term.pending;
+  // No log for this action once the request has ended: Module Manager lost it (restarted)
+  // or never wrote it — say so instead of spinning on.
+  const gone = !j && !term.pending;
+  const running = !gone && (!j || j.running || term.pending);
   const failed = term.local.some((l) => l.kind === 'err') || (j && !j.running && !j.ok);
-  $('#term-dot').className = `term-dot ${running && !failed ? 'run' : failed ? 'err' : 'ok'}`;
+  $('#term-dot').className = `term-dot ${gone ? '' : running && !failed ? 'run' : failed ? 'err' : 'ok'}`;
   $('#term-title').textContent = term.label || (j ? termTarget(j) : '');
   const secs = j ? Math.round(((j.running || !j.ended ? Date.now() : new Date(j.ended).getTime()) - t0) / 1000) : 0;
-  $('#term-state').textContent = failed ? t('term.failed') : running ? t('term.running', { s: secs }) : t('term.ok', { s: secs });
+  $('#term-state').textContent = gone ? t('term.gone') : failed ? t('term.failed') : running ? t('term.running', { s: secs }) : t('term.ok', { s: secs });
 }
 
 function termSay(kind, key, args) {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 func kinds(s Snapshot) string {
@@ -25,7 +26,7 @@ func TestAJobRecordsStepsAndItsResult(t *testing.T) {
 	l.Output([]byte("\x1b[32minstalled\x1b[0m r\n\n"))
 	l.Finish(nil)
 	s := l.Snapshot()
-	if s.ID != 1 || s.Running || !s.OK || s.Ended.IsZero() || s.Action != "install" || s.Target != "gh:o/r" {
+	if s.ID <= 0 || s.Running || !s.OK || s.Ended.IsZero() || s.Action != "install" || s.Target != "gh:o/r" {
 		t.Fatalf("job %+v", s)
 	}
 	if got := kinds(s); got != "step,cmd,out,ok" {
@@ -39,8 +40,9 @@ func TestAJobRecordsStepsAndItsResult(t *testing.T) {
 	}
 	l.Start("uninstall", "r")
 	l.Finish(errors.New("zpkg remove r: exit status 1"))
+	first := s.ID
 	s = l.Snapshot()
-	if s.ID != 2 || s.OK || len(s.Lines) != 1 || s.Lines[0].Kind != Err || !strings.Contains(s.Lines[0].Text, "exit status 1") {
+	if s.ID <= first || s.OK || len(s.Lines) != 1 || s.Lines[0].Kind != Err || !strings.Contains(s.Lines[0].Text, "exit status 1") {
 		t.Fatalf("failed job %+v", s)
 	}
 }
@@ -161,5 +163,26 @@ func TestExecStreamErrorNamesTheCommandAndItsOutput(t *testing.T) {
 	}
 	if got := kinds(l.Snapshot()); got != "cmd,out,out" {
 		t.Fatalf("kinds %s", got)
+	}
+}
+
+// A restarted Module Manager starts a new Log: its first id must be above the last id of
+// the old process, else a page that stayed open hides the new job.
+func TestIDsGrowAcrossARestart(t *testing.T) {
+	t0 := time.Date(2026, 10, 27, 16, 39, 0, 0, time.UTC)
+	old := Log{now: func() time.Time { return t0 }}
+	old.Start("hide", "a")
+	old.Start("restore", "a") // same millisecond: still a new id
+	if a, b := old.Snapshot().ID, old.Snapshot().ID; a != b {
+		t.Fatal("unstable snapshot")
+	}
+	last := old.Snapshot().ID
+	if last != t0.UnixMilli()+1 {
+		t.Errorf("second id in the same millisecond %d", last)
+	}
+	restarted := Log{now: func() time.Time { return t0.Add(time.Second) }}
+	restarted.Start("install", "gh:o/r")
+	if id := restarted.Snapshot().ID; id <= last {
+		t.Fatalf("id after restart %d, not above %d", id, last)
 	}
 }

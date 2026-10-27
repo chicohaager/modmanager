@@ -337,23 +337,24 @@ func TestProgressShowsTheLastCatalogAction(t *testing.T) {
 		t.Fatalf("before any action: %+v", s)
 	}
 	do(t, mux, http.MethodPost, "/modmanager/catalog/install", `{"id":"gh:o/r"}`, nil)
-	if s := read(); s.ID != 1 || s.Action != "install" || s.Target != "gh:o/r" || s.Running || !s.OK {
-		t.Fatalf("after install: %+v", s)
+	s1 := read()
+	if s1.ID <= 0 || s1.Action != "install" || s1.Target != "gh:o/r" || s1.Running || !s1.OK {
+		t.Fatalf("after install: %+v", s1)
 	}
 	f.err = catalog.ErrChecksum
 	do(t, mux, http.MethodPost, "/modmanager/catalog/uninstall", `{"name":"r"}`, nil)
 	s := read()
-	if s.ID != 2 || s.Action != "uninstall" || s.OK || len(s.Lines) != 1 || s.Lines[0].Kind != progress.Err {
+	if s.ID <= s1.ID || s.Action != "uninstall" || s.OK || len(s.Lines) != 1 || s.Lines[0].Kind != progress.Err {
 		t.Fatalf("after a failed uninstall: %+v", s)
 	}
 	f.err = nil
 	do(t, mux, http.MethodPost, "/modmanager/catalog/repos", `{"repo":"o/x"}`, nil)
-	if s := read(); s.ID != 2 {
-		t.Errorf("adding a repository replaced the log: %+v", s)
+	if s2 := read(); s2.ID != s.ID {
+		t.Errorf("adding a repository replaced the log: %+v", s2)
 	}
 	do(t, mux, http.MethodPost, "/modmanager/self/update", `{}`, nil)
-	if s := read(); s.ID != 3 || s.Action != "self-update" || !s.OK {
-		t.Errorf("after self-update: %+v", s)
+	if s3 := read(); s3.ID <= s.ID || s3.Action != "self-update" || !s3.OK {
+		t.Errorf("after self-update: %+v", s3)
 	}
 }
 
@@ -366,7 +367,7 @@ func TestAppActionsRunAsAJob(t *testing.T) {
 	mux := newMux(svc, &fakeCat{}, requireToken)
 	do(t, mux, http.MethodPost, "/modmanager/apps/hide", `{"id":"module:icewhale_photos"}`, nil)
 	s := jobs.Snapshot()
-	if s.ID != 1 || s.Action != "hide" || s.Target != "module:icewhale_photos" || s.Running || !s.OK {
+	if s.ID <= 0 || s.Action != "hide" || s.Target != "module:icewhale_photos" || s.Running || !s.OK {
 		t.Fatalf("job %+v", s)
 	}
 	if svc.log != jobs {
@@ -374,7 +375,7 @@ func TestAppActionsRunAsAJob(t *testing.T) {
 	}
 	svc.err = sysapps.ErrBlocked
 	do(t, mux, http.MethodPost, "/modmanager/apps/hide", `{"id":"module:icewhale_photos"}`, nil)
-	if s := jobs.Snapshot(); s.ID != 2 || s.OK || len(s.Lines) != 1 || s.Lines[0].Kind != progress.Err {
-		t.Fatalf("failed hide %+v", s)
+	if s2 := jobs.Snapshot(); s2.ID <= s.ID || s2.OK || len(s2.Lines) != 1 || s2.Lines[0].Kind != progress.Err {
+		t.Fatalf("failed hide %+v", s2)
 	}
 }
