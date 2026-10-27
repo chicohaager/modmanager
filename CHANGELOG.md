@@ -2,6 +2,11 @@
 
 Releases: https://github.com/chicohaager/modmanager/releases. Every release is amd64 only and tested on a ZimaBoard 2 with ZimaOS 1.8.0.
 
+## 0.3.3 — unreleased
+
+- Catalog: **Restart needed** on a module whose service still runs the program its image replaced — `zpkg install --force` does not restart services (measured on ZimaOS 1.8.0). Module Manager compares each service of the module (its unit files in the image, templates with their running instances) with the program file its `ExecStart` names, so this works for every module, also ones released before; modules built with lintux-modkit v0.1.3 also report it on their health route (`"binary":"replaced"`). The button **Restart (reinstall)** reinstalls the release through `zpkg remove` + `zpkg install`, which restarts the services.
+- Built against lintux-modkit v0.1.3.
+
 ## 0.3.2 — 2026-10-26
 
 - Prometheus Exporter in the catalog (`chicohaager/zimaos-node-exporter-sysext` v1.0.0: `node_exporter` and `smartctl_exporter` on the host for Prometheus and Grafana, installed version from `/node-exporter/health`).

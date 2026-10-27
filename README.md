@@ -1,6 +1,6 @@
 # Module Manager for ZimaOS
 
-**Version 0.3.2** · ZimaOS 1.8.0 (amd64) · sysext module `modmanager`
+**Version 0.3.3** · ZimaOS 1.8.0 (amd64) · sysext module `modmanager`
 
 Hide or restore the apps ZimaOS ships built in — Photos, PeerDrop, ZVM and the Backup tile — and see every installed module. Nothing is deleted unless you ask for it: **Restore** brings an app back exactly as ZimaOS shipped it.
 

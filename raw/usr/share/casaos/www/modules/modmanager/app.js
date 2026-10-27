@@ -318,7 +318,8 @@ function catalogCardHTML(e) {
       if (!e.installed) actions += `<button class="btn-primary btn-small" data-cat="install" data-id="${esc(e.id)}">${esc(t('btn.install'))}</button>`;
       else if (e.state === 'update') actions += `<button class="btn-primary btn-small" data-cat="install" data-id="${esc(e.id)}">${esc(e.installed_version ? t('btn.updateTo', { rel }) : t('btn.installRel', { rel }))}</button>`;
       // "newer": no button — it would downgrade a development build to the release.
-      else if (e.state !== 'newer') actions += `<button class="btn-small" data-cat="install" data-id="${esc(e.id)}">${esc(t('btn.reinstall'))}</button>`;
+      // restart_needed: the running process is older than its file; a reinstall (zpkg remove + install) restarts it
+      else if (e.state !== 'newer') actions += `<button class="${e.restart_needed ? 'btn-primary ' : ''}btn-small" data-cat="install" data-id="${esc(e.id)}">${esc(t(e.restart_needed ? 'btn.restart' : 'btn.reinstall'))}</button>`;
     }
     if (e.installed && !e.protected) {
       const label = armed === e.name ? t('btn.uninstallAgain') : t('btn.uninstall');
@@ -329,7 +330,7 @@ function catalogCardHTML(e) {
   return `<div class="card">
     <div class="app-head"><span class="app-icon">${esc((e.title || e.name || '?').charAt(0).toUpperCase())}</span>
       <div class="app-text"><div class="app-title">${esc(e.title || e.name)}</div><div class="app-sub mono">${sub}</div>${repoLink}</div>
-      <div class="app-badges">${e.source === 'repo' ? pill('pill-warn', t('badge.thirdParty')) : ''}${e.error && !e.installed ? '' : stateBadge(e)}</div>
+      <div class="app-badges">${e.source === 'repo' ? pill('pill-warn', t('badge.thirdParty')) : ''}${e.error && !e.installed ? '' : stateBadge(e)}${e.restart_needed ? pill('pill-warn', t('badge.restart'), t('badge.restart.title') + (e.stale_units && e.stale_units.length ? ` (${e.stale_units.join(', ')})` : '')) : ''}</div>
     </div>
     ${e.source === 'repo' ? `<div class="trust-note">${esc(t('card.trust'))}</div>` : ''}
     ${note}${err}${body}

@@ -30,12 +30,13 @@ type fakeGitHub struct {
 	webOff   bool // the github.com release pages are not reachable either
 	webCalls int
 	health   map[string]string // path -> version answered as {"version": …}
+	binary   map[string]string // path -> "binary" field of that answer (lintux-modkit webmod), absent when unset
 	apiCalls int
 	mu       sync.Mutex
 }
 
 func newGitHub(t *testing.T) *fakeGitHub {
-	g := &fakeGitHub{releases: map[string]map[string]string{}, tags: map[string]string{}, health: map[string]string{}}
+	g := &fakeGitHub{releases: map[string]map[string]string{}, tags: map[string]string{}, health: map[string]string{}, binary: map[string]string{}}
 	g.srv = httptest.NewServer(http.HandlerFunc(g.serve))
 	t.Cleanup(g.srv.Close)
 	u, _ := url.Parse(g.srv.URL)
@@ -49,7 +50,11 @@ func (g *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if v, ok := g.health[r.URL.Path]; ok {
-		_, _ = w.Write([]byte(`{"status":"healthy","version":"` + v + `"}`))
+		bin := ""
+		if b, ok := g.binary[r.URL.Path]; ok {
+			bin = `,"binary":"` + b + `"`
+		}
+		_, _ = w.Write([]byte(`{"status":"healthy","version":"` + v + `"` + bin + `}`))
 		return
 	}
 	if r.URL.Path == "/v2/mod_management/management/modules" {
@@ -126,6 +131,10 @@ type recorder struct {
 	lists map[string]string
 	// failInstall makes `zpkg install` of an image with this content fail.
 	failInstall map[string]bool
+	// units answers `systemctl show -p MainPID|ExecStart --value <unit>`: pid and program path;
+	// instances answers `systemctl list-units … <template>@*.service`.
+	units     map[string][2]string
+	instances map[string]string
 }
 
 func (r *recorder) run(_ context.Context, name string, args ...string) ([]byte, error) {
@@ -139,6 +148,20 @@ func (r *recorder) run(_ context.Context, name string, args ...string) ([]byte, 
 			return nil, fmt.Errorf("unsquashfs: %w", err)
 		}
 		return []byte("squashfs-root\n" + r.lists[string(b)]), nil
+	}
+	if name == "systemctl" && len(args) == 5 && args[0] == "show" && args[1] == "-p" {
+		u, ok := r.units[args[4]]
+		switch {
+		case !ok:
+			return []byte("\n"), nil
+		case args[2] == "MainPID":
+			return []byte(u[0] + "\n"), nil
+		case args[2] == "ExecStart":
+			return []byte("{ path=" + u[1] + " ; argv[]=" + u[1] + " serve ; ignore_errors=no }\n"), nil
+		}
+	}
+	if name == "systemctl" && len(args) == 5 && args[0] == "list-units" {
+		return []byte(r.instances[args[4]]), nil
 	}
 	if name == "zpkg" && len(args) == 2 && args[0] == "install" && strings.HasSuffix(args[1], ".raw") {
 		b, err := os.ReadFile(args[1])
@@ -737,4 +760,78 @@ func TestSysextModulePresetsReadTheirHealthRoute(t *testing.T) {
 			t.Errorf("no preset for zimaos-%s-sysext", name)
 		}
 	}
+}
+
+// A module updated with `zpkg install --force` keeps running the old process
+// (measured on 1.8.0); its webmod health route says "binary":"replaced".
+func TestReplacedBinaryAsksForARestart(t *testing.T) {
+	for _, tc := range []struct {
+		binary  string
+		set     bool
+		restart bool
+	}{{"replaced", true, true}, {"current", true, false}, {"unknown", true, false}, {"", false, false}} {
+		c, g, rec := setup(t)
+		g.releases["lintux/cron"] = map[string]string{"cron-amd64.raw": "img", "cron-amd64.raw.sha256": sum("img")}
+		g.tags["lintux/cron"] = "v0.3.3"
+		g.health["/cron/health"] = "0.3.3"
+		if tc.set {
+			g.binary["/cron/health"] = tc.binary
+		}
+		must(t, os.WriteFile(filepath.Join(rec.ext, "cron.raw"), []byte("img"), 0o644))
+		entries, _, err := c.List(context.Background())
+		must(t, err)
+		found := false
+		for _, e := range entries {
+			if e.ID == "gh:lintux/cron" {
+				found = true
+				if e.RestartNeeded != tc.restart || e.State != "current" {
+					t.Errorf("binary %q (set %v): restart_needed %v state %q, want %v current", tc.binary, tc.set, e.RestartNeeded, e.State, tc.restart)
+				}
+			}
+		}
+		if !found {
+			t.Fatal("no cron entry")
+		}
+	}
+}
+
+// Modules built before their health route reported "binary" (every release up
+// to lintux-modkit v0.1.2): Module Manager compares the processes itself.
+func TestStaleUnitsMeasuredWithoutTheModulesHelp(t *testing.T) {
+	c, g, rec := setup(t)
+	g.releases["lintux/cron"] = map[string]string{"cron-amd64.raw": "img", "cron-amd64.raw.sha256": sum("img")}
+	g.tags["lintux/cron"] = "v0.3.3"
+	g.health["/cron/health"] = "0.3.3" // no "binary" field, as released modules answer
+	must(t, os.WriteFile(filepath.Join(rec.ext, "cron.raw"), []byte("img"), 0o644))
+	rec.lists = map[string]string{"img": "squashfs-root/usr/bin/cron-web\nsquashfs-root/usr/lib/systemd/system/cron-web.service\n" +
+		"squashfs-root/usr/lib/systemd/system/cron-job@.service\nsquashfs-root/usr/lib/systemd/system/cron.timer\nsquashfs-root/usr/share/doc/cron/README\n"}
+	bin := filepath.Join(t.TempDir(), "cron-web")
+	must(t, os.WriteFile(bin, []byte("new program"), 0o755))
+	proc := func(pid, bytes string) {
+		must(t, os.MkdirAll(filepath.Join(c.Root, "proc", pid), 0o755))
+		must(t, os.WriteFile(filepath.Join(c.Root, "proc", pid, "exe"), []byte(bytes), 0o755))
+	}
+	rec.units = map[string][2]string{"cron-web.service": {"101", bin}, "cron-job@nightly.service": {"102", bin}}
+	rec.instances = map[string]string{"cron-job@*.service": "cron-job@nightly.service loaded active running nightly\n"}
+	check := func(want string) {
+		t.Helper()
+		entries, _, err := c.List(context.Background())
+		must(t, err)
+		for _, e := range entries {
+			if e.ID == "gh:lintux/cron" {
+				if got := strings.Join(e.StaleUnits, ","); got != want || e.RestartNeeded != (want != "") {
+					t.Fatalf("stale_units %q restart_needed %v, want %q", got, e.RestartNeeded, want)
+				}
+				return
+			}
+		}
+		t.Fatal("no cron entry")
+	}
+	proc("101", "new program")
+	proc("102", "new program")
+	check("")
+	proc("101", "old program") // the web backend runs the replaced program
+	check("cron-web.service")
+	proc("102", "old program") // and an instance of the template too
+	check("cron-web.service,cron-job@nightly.service")
 }
