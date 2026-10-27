@@ -1,6 +1,7 @@
 package progress
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -109,5 +110,19 @@ func TestANilLogIgnoresEverything(t *testing.T) {
 	l.Finish(nil)
 	if s := l.Snapshot(); s.ID != 0 || s.Lines == nil {
 		t.Fatalf("%+v", s)
+	}
+}
+
+// Before the first action the answer has no start or end time (not year 1).
+func TestNoJobHasNoTimes(t *testing.T) {
+	var l Log
+	b, _ := json.Marshal(l.Snapshot())
+	if strings.Contains(string(b), "started") || strings.Contains(string(b), "ended") {
+		t.Fatalf("%s", b)
+	}
+	l.Start("install", "x")
+	b, _ = json.Marshal(l.Snapshot())
+	if !strings.Contains(string(b), `"started"`) || strings.Contains(string(b), "ended") {
+		t.Fatalf("running job %s", b)
 	}
 }
