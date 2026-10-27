@@ -277,7 +277,8 @@ async function loadModules() {
 async function loadLoops() {
   const s = await api(`${API_BASE}/loops`);
   const el = $('#loops-info');
-  el.textContent = t(s.old_states >= s.threshold ? 'loops.many' : 'loops.info', { loops: s.loops, old: s.old_states });
+  const stale = (s.stale_usr || []).length ? ` ${t('loops.staleUsr', { units: s.stale_usr.join(', ') })}` : '';
+  el.textContent = t(s.old_states >= s.threshold ? 'loops.many' : 'loops.info', { loops: s.loops, old: s.old_states }) + stale;
   el.classList.toggle('warn-note', s.old_states >= s.threshold);
   el.hidden = false;
 }

@@ -164,3 +164,52 @@ func TestRunWithdrawsACardOfThePreviousRun(t *testing.T) {
 		t.Fatalf("events %q", got)
 	}
 }
+
+// procTree writes /proc/<pid>/{mountinfo,cgroup,ns/mnt} for each pid.
+func procTree(t *testing.T, procs map[string][3]string) string {
+	t.Helper()
+	proc := t.TempDir()
+	for pid, p := range procs {
+		d := filepath.Join(proc, pid)
+		if err := os.MkdirAll(filepath.Join(d, "ns"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "mountinfo"), []byte(p[0]), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "cgroup"), []byte(p[1]), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(p[2], filepath.Join(d, "ns", "mnt")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return proc
+}
+
+// The stacking as measured on .184 (systemd-logind, 2026-10-27): the old /usr of the
+// service's start sits on the current one and comes first in mountinfo.
+func TestStaleUsrFindsServicesWithTheOldUsrOnTop(t *testing.T) {
+	host := "24 1 0:317 / /usr ro,nodev,relatime shared:9 - overlay sysext ro,lowerdir=x\n"
+	logind := "391 1558 0:44 / /usr ro,nosuid,nodev,relatime master:9 - overlay sysext ro,lowerdir=x\n" +
+		"1558 354 0:317 / /usr ro,nodev,relatime master:9 - overlay sysext ro,lowerdir=x\n"
+	current := "1731 1122 0:317 / /usr ro,nodev,relatime master:9 - overlay sysext ro,lowerdir=x\n"
+	proc := procTree(t, map[string][3]string{
+		"1":   {host, "0::/init.scope\n", "mnt:[1]"},
+		"983": {logind, "0::/system.slice/systemd-logind.service\n", "mnt:[2]"},
+		"984": {logind, "0::/system.slice/systemd-logind.service\n", "mnt:[2]"}, // same namespace: once
+		"990": {logind, "0::/system.slice/virtlogd.service\n", "mnt:[3]"},
+		"995": {current, "0::/system.slice/cron.service\n", "mnt:[4]"},
+		"999": {"", "0::/system.slice/docker-x.scope\n", "mnt:[5]"}, // a container without /usr from the host
+	})
+	got := StaleUsr(proc)
+	if strings.Join(got, ",") != "systemd-logind.service,virtlogd.service" {
+		t.Fatalf("stale %v", got)
+	}
+}
+
+func TestStaleUsrWithoutAHostUsrIsEmpty(t *testing.T) {
+	if got := StaleUsr(t.TempDir()); got == nil || len(got) != 0 {
+		t.Fatalf("%#v", got)
+	}
+}
