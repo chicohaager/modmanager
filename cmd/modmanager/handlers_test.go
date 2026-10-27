@@ -385,9 +385,9 @@ func TestAppActionsRunAsAJob(t *testing.T) {
 
 // GET /modmanager/loops needs a token and reports a fresh measurement.
 func TestLoopsRouteMeasures(t *testing.T) {
-	old := loopSys
-	t.Cleanup(func() { loopSys = old })
-	loopSys = t.TempDir()
+	old, oldProc := loopSys, loopProc
+	t.Cleanup(func() { loopSys, loopProc = old, oldProc })
+	loopSys, loopProc = t.TempDir(), t.TempDir()
 	for i, f := range []string{"/zfw.raw", "/zfw.raw", "/cron.raw"} {
 		d := filepath.Join(loopSys, fmt.Sprintf("loop%d", i), "loop")
 		if err := os.MkdirAll(d, 0o755); err != nil {
@@ -406,7 +406,7 @@ func TestLoopsRouteMeasures(t *testing.T) {
 	}
 	w = do(t, mux, http.MethodGet, "/modmanager/loops", "", nil)
 	var st loops.Stats
-	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &st) != nil || st.Loops != 3 || st.Images != 2 || st.OldStates != 1 {
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &st) != nil || st.Loops != 3 || st.Images != 2 || st.OldStates != 1 || st.StaleUsr == nil {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}
 }

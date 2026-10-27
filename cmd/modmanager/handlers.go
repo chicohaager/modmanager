@@ -236,6 +236,9 @@ func catalogActionHandler(cat catalogService, action string) http.HandlerFunc {
 // loopSys is where loopsHandler reads the loop devices; tests point it into a temp dir.
 var loopSys = loops.DefaultSysBlock
 
+// loopProc is the /proc loopsHandler reads mount namespaces from; tests point it elsewhere.
+var loopProc = loops.DefaultProc
+
 // loopsHandler measures the loop devices old system-extension states hold (internal/loops).
 func loopsHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -248,6 +251,7 @@ func loopsHandler() http.HandlerFunc {
 			httpx.WriteError(w, http.StatusInternalServerError, "internal", err.Error())
 			return
 		}
+		st.StaleUsr = loops.StaleUsr(loopProc)
 		httpx.WriteJSON(w, http.StatusOK, st)
 	}
 }

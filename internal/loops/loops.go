@@ -16,7 +16,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +28,9 @@ import (
 
 // DefaultSysBlock is where the kernel lists block devices.
 const DefaultSysBlock = "/sys/block"
+
+// DefaultProc is the host's /proc.
+const DefaultProc = "/proc"
 
 // Threshold of old states from which the card shows. Three states (two old) are
 // there after every boot of 1.8.0 (measured: 3 loop devices per image 150 s after
@@ -43,6 +48,76 @@ type Stats struct {
 	Images    int `json:"images"`     // different image files among them
 	OldStates int `json:"old_states"` // the most loop devices one image has, minus the current one
 	Threshold int `json:"threshold"`
+	// StaleUsr names the services whose mount namespace still shows the /usr of their
+	// start on top of the current one (measured: systemd-logind, systemd-networkd,
+	// virtlogd after a refresh); they keep using the old files until they restart.
+	StaleUsr []string `json:"stale_usr"`
+}
+
+// StaleUsr lists, per mount namespace, the unit of a process whose topmost /usr mount
+// is not the host's (/proc/1/mountinfo). Sorted, without duplicates.
+func StaleUsr(proc string) []string {
+	host := topUsr(filepath.Join(proc, "1", "mountinfo"))
+	if host == "" {
+		return []string{}
+	}
+	pids, _ := filepath.Glob(filepath.Join(proc, "[0-9]*"))
+	seen := map[string]bool{}
+	units := map[string]bool{}
+	for _, p := range pids {
+		ns, err := os.Readlink(filepath.Join(p, "ns", "mnt"))
+		if err != nil || seen[ns] {
+			continue
+		}
+		seen[ns] = true
+		if top := topUsr(filepath.Join(p, "mountinfo")); top != "" && top != host {
+			units[unitOf(filepath.Join(p, "cgroup"))] = true
+		}
+	}
+	out := []string{}
+	for u := range units {
+		out = append(out, u)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// topUsr is the device (major:minor) of the /usr mount a path lookup reaches: the one
+// no other /usr mount sits on. mountinfo lists stacked mounts in no fixed order
+// (measured: the old /usr of systemd-logind, on top, came first).
+func topUsr(mountinfo string) string {
+	b, err := os.ReadFile(mountinfo)
+	if err != nil {
+		return ""
+	}
+	type m struct{ id, parent, dev string }
+	var usr []m
+	for _, l := range strings.Split(string(b), "\n") {
+		f := strings.Fields(l)
+		if len(f) > 4 && f[4] == "/usr" {
+			usr = append(usr, m{f[0], f[1], f[2]})
+		}
+	}
+	under := map[string]bool{}
+	for _, u := range usr {
+		under[u.parent] = true
+	}
+	for _, u := range usr {
+		if !under[u.id] {
+			return u.dev
+		}
+	}
+	return ""
+}
+
+// unitOf takes the unit from the process' cgroup ("0::/system.slice/systemd-logind.service").
+func unitOf(cgroup string) string {
+	b, err := os.ReadFile(cgroup)
+	if err != nil {
+		return "?"
+	}
+	line := strings.TrimSpace(strings.Split(string(b), "\n")[0])
+	return path.Base(line)
 }
 
 // Measure reads the loop devices from sys (/sys/block). An image counts by the file
