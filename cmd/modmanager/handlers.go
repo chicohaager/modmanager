@@ -10,6 +10,7 @@ import (
 
 	"github.com/chicohaager/lintux-modkit/httpx"
 	"github.com/chicohaager/modmanager/internal/catalog"
+	"github.com/chicohaager/modmanager/internal/progress"
 	"github.com/chicohaager/modmanager/internal/state"
 	"github.com/chicohaager/modmanager/internal/sysapps"
 	"github.com/chicohaager/modmanager/internal/updates"
@@ -21,6 +22,10 @@ const catalogTimeout = 10 * time.Minute
 // actionMu serialises every changing action: hiding an app and zpkg
 // installing a module both run systemd-sysext refresh over all of /usr.
 var actionMu sync.Mutex
+
+// jobs is the log of the running (or last) install, uninstall or self-update; the
+// catalog writes into it (main sets catalog.Progress) and the page polls it.
+var jobs = &progress.Log{}
 
 // catalogService is what the handlers need from catalog.Catalog.
 type catalogService interface {
@@ -57,6 +62,8 @@ func newMux(svc appService, cat catalogService, verify func(http.Handler) http.H
 	mux.Handle(routePrefix+"/self", logged(verify(selfHandler(cat))))
 	mux.Handle(routePrefix+"/self/update", logged(verify(selfUpdateHandler(cat))))
 	mux.Handle(routePrefix+"/ui-lang", logged(verify(uiLangHandler())))
+	// Not logged: the page asks about twice a second while an action runs.
+	mux.Handle(routePrefix+"/progress", verify(progressHandler()))
 	return mux
 }
 
@@ -191,9 +198,13 @@ func catalogActionHandler(cat catalogService, action string) http.HandlerFunc {
 		target := req.ID + req.Name + req.Repo
 		switch action {
 		case "install":
+			jobs.Start(action, req.ID)
 			err = cat.Install(ctx, req.ID)
+			jobs.Finish(err)
 		case "uninstall":
+			jobs.Start(action, req.Name)
 			err = cat.Uninstall(ctx, req.Name)
+			jobs.Finish(err)
 		case "add-repo":
 			_, err = cat.AddRepo(ctx, req.Repo)
 		case "remove-repo":
@@ -213,6 +224,17 @@ func catalogActionHandler(cat catalogService, action string) http.HandlerFunc {
 			return
 		}
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"entries": entries, "repos": repos})
+	}
+}
+
+// progressHandler returns the log of the running or last action (id 0: none yet).
+func progressHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			httpx.MethodNotAllowed(w)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, jobs.Snapshot())
 	}
 }
 
@@ -240,7 +262,9 @@ func selfUpdateHandler(cat catalogService) http.HandlerFunc {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), catalogTimeout)
 		defer cancel()
 		actionMu.Lock()
+		jobs.Start("self-update", version)
 		tag, err := cat.SelfUpdate(ctx, version)
+		jobs.Finish(err)
 		actionMu.Unlock()
 		if err != nil {
 			log.Printf("[modmanager] self-update from %s: %v", version, err)

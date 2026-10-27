@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/chicohaager/modmanager/internal/catalog"
+	"github.com/chicohaager/modmanager/internal/progress"
 	"github.com/chicohaager/modmanager/internal/state"
 	"github.com/chicohaager/modmanager/internal/sysapps"
 	"github.com/chicohaager/modmanager/internal/updates"
@@ -305,5 +306,51 @@ func TestEveryPartUsesTheRootOnlyStateDir(t *testing.T) {
 	}
 	if state.Dir != "/DATA/.modmanager" || state.OldDir != "/DATA/AppData/modmanager" {
 		t.Errorf("dirs %s %s", state.Dir, state.OldDir)
+	}
+}
+
+// The page polls /progress while an install runs; it needs a token, is not logged and
+// shows the job the catalog action started and finished.
+func TestProgressShowsTheLastCatalogAction(t *testing.T) {
+	old := jobs
+	jobs = &progress.Log{}
+	t.Cleanup(func() { jobs = old })
+	f := &fakeCat{}
+	mux := newMux(&fakeSvc{}, f, requireToken)
+	req := httptest.NewRequest(http.MethodGet, "/modmanager/progress", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("progress without token: %d", w.Code)
+	}
+	read := func() progress.Snapshot {
+		w := do(t, mux, http.MethodGet, "/modmanager/progress", "", nil)
+		var s progress.Snapshot
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &s) != nil {
+			t.Fatalf("progress: %d %s", w.Code, w.Body)
+		}
+		return s
+	}
+	if s := read(); s.ID != 0 || s.Running {
+		t.Fatalf("before any action: %+v", s)
+	}
+	do(t, mux, http.MethodPost, "/modmanager/catalog/install", `{"id":"gh:o/r"}`, nil)
+	if s := read(); s.ID != 1 || s.Action != "install" || s.Target != "gh:o/r" || s.Running || !s.OK {
+		t.Fatalf("after install: %+v", s)
+	}
+	f.err = catalog.ErrChecksum
+	do(t, mux, http.MethodPost, "/modmanager/catalog/uninstall", `{"name":"r"}`, nil)
+	s := read()
+	if s.ID != 2 || s.Action != "uninstall" || s.OK || len(s.Lines) != 1 || s.Lines[0].Kind != progress.Err {
+		t.Fatalf("after a failed uninstall: %+v", s)
+	}
+	f.err = nil
+	do(t, mux, http.MethodPost, "/modmanager/catalog/repos", `{"repo":"o/x"}`, nil)
+	if s := read(); s.ID != 2 {
+		t.Errorf("adding a repository replaced the log: %+v", s)
+	}
+	do(t, mux, http.MethodPost, "/modmanager/self/update", `{}`, nil)
+	if s := read(); s.ID != 3 || s.Action != "self-update" || !s.OK {
+		t.Errorf("after self-update: %+v", s)
 	}
 }

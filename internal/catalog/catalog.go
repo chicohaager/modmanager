@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -38,11 +39,15 @@ import (
 	"time"
 
 	"github.com/chicohaager/lintux-modkit/stale"
+	"github.com/chicohaager/modmanager/internal/progress"
 	"github.com/chicohaager/modmanager/internal/state"
 )
 
 // Runner runs a command and returns its combined output.
 type Runner func(ctx context.Context, name string, args ...string) ([]byte, error)
+
+// StreamRunner runs a command and writes its output to out while it runs.
+type StreamRunner func(ctx context.Context, out io.Writer, name string, args ...string) error
 
 // Preset is a known repository.
 type Preset struct {
@@ -121,6 +126,8 @@ type Entry struct {
 // Catalog lists and installs modules.
 type Catalog struct {
 	Run       Runner
+	Stream    StreamRunner  // nil: commands that change the host go through Run, output after the end
+	Progress  *progress.Log // nil: no progress report
 	HTTP      *http.Client
 	GitHubAPI string // https://api.github.com
 	GitHubWeb string // https://github.com — release pages, used when the API is rate limited
@@ -792,6 +799,8 @@ func (c *Catalog) installRepo(ctx context.Context, repo string) error {
 			return fmt.Errorf("%w: %s", ErrOwn, p.Command)
 		}
 	}
+	p := c.Progress
+	p.Stepf("release", "Asking GitHub for the latest release of {repo}", "repo", repo)
 	rel, _, err := c.latest(ctx, repo, true)
 	if err != nil {
 		return err
@@ -803,6 +812,7 @@ func (c *Catalog) installRepo(ctx context.Context, repo string) error {
 	if protected[name] {
 		return ErrProtected
 	}
+	p.Stepf("image", "Release {tag}: image {file}", "tag", rel.Tag, "file", img.Name)
 	want, err := c.checksumFor(ctx, rel, img)
 	if err != nil {
 		return err
@@ -829,29 +839,57 @@ func (c *Catalog) installRepo(ctx context.Context, repo string) error {
 			return err
 		}
 		defer func() { _ = os.RemoveAll(filepath.Dir(previous)) }()
+		p.Stepf("keep", "Keeping a copy of the installed image for the way back")
 		if err := copyFile(c.installedFile(name), previous); err != nil {
 			return fmt.Errorf("no copy of the installed image for the way back: %w", err)
 		}
-		if _, err := c.Run(ctx, "zpkg", "remove", name); err != nil {
+		if _, err := c.change(ctx, "zpkg", "remove", name); err != nil {
 			return err
 		}
 	}
-	if out, err := c.Run(ctx, "zpkg", "install", dst); err != nil {
+	if out, err := c.change(ctx, "zpkg", "install", dst); err != nil {
 		if previous == "" {
 			return err
 		}
 		failed := fmt.Errorf("zpkg install: %v %s", err, strings.TrimSpace(string(out)))
+		p.Errf("wayBack", "zpkg install failed; installing the previous version again")
 		// the way back also when the request was canceled: the module must not stay removed
 		bctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 		defer cancel()
-		if _, rerr := c.Run(bctx, "zpkg", "install", previous); rerr != nil {
+		if _, rerr := c.change(bctx, "zpkg", "install", previous); rerr != nil {
 			return fmt.Errorf("%w; the previous version could not be installed again: %v", failed, rerr)
 		}
-		_, _ = c.Run(bctx, "systemctl", "daemon-reload")
+		_, _ = c.change(bctx, "systemctl", "daemon-reload")
 		return fmt.Errorf("%w; the previous version installed again", failed)
 	}
-	_, err = c.Run(ctx, "systemctl", "daemon-reload")
+	_, err = c.change(ctx, "systemctl", "daemon-reload")
 	return err
+}
+
+// change runs a command that changes the host and reports it with its output:
+// live through Stream when there is one, else through Run after it ended.
+func (c *Catalog) change(ctx context.Context, name string, args ...string) ([]byte, error) {
+	c.Progress.Command(name, args...)
+	if c.Stream == nil {
+		out, err := c.Run(ctx, name, args...)
+		c.Progress.Output(out)
+		return out, err
+	}
+	w := c.Progress.Writer()
+	err := c.Stream(ctx, w, name, args...)
+	w.Flush()
+	out := w.Tail()
+	if err != nil {
+		return out, fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return out, nil
+}
+
+// ExecStream runs a command on the host, stdout and stderr into out.
+func ExecStream(ctx context.Context, out io.Writer, name string, args ...string) error {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdout, cmd.Stderr = out, out
+	return cmd.Run()
 }
 
 // checkCollisions refuses an image that carries a file the host already has.
@@ -861,6 +899,7 @@ func (c *Catalog) installRepo(ctx context.Context, repo string) error {
 // installed version of the same module are in /usr already and do not count.
 // Without a file list there is no check, so that refuses the install too.
 func (c *Catalog) checkCollisions(ctx context.Context, name, img string) error {
+	c.Progress.Stepf("collisions", "Checking the image's files against ZimaOS")
 	files, err := c.imageFiles(ctx, img)
 	if err != nil {
 		return err
@@ -887,6 +926,7 @@ func (c *Catalog) checkCollisions(ctx context.Context, name, img string) error {
 		hit = append(hit, f)
 	}
 	if len(hit) == 0 {
+		c.Progress.Okf("noCollision", "{n} files, none replaces a file of ZimaOS", "n", fmt.Sprint(len(files)))
 		return nil
 	}
 	if len(hit) > 5 {
@@ -932,7 +972,10 @@ func (c *Catalog) download(ctx context.Context, u, dst, want string) error {
 		return err
 	}
 	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(f, h), io.LimitReader(resp.Body, c.MaxBytes+1))
+	c.Progress.Stepf("download", "Downloading {url}", "url", u)
+	bar := &barWriter{log: c.Progress, total: resp.ContentLength}
+	n, err := io.Copy(io.MultiWriter(f, h, bar), io.LimitReader(resp.Body, c.MaxBytes+1))
+	bar.done()
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
@@ -945,8 +988,28 @@ func (c *Catalog) download(ctx context.Context, u, dst, want string) error {
 	if got := hex.EncodeToString(h.Sum(nil)); got != want {
 		return fmt.Errorf("%w (expected %s, got %s)", ErrChecksum, want[:12], got[:12])
 	}
+	c.Progress.Okf("checksum", "sha256 {sum}… matches the release's checksum", "sum", want[:12])
 	return nil
 }
+
+// barWriter reports a download's progress at most four times a second.
+type barWriter struct {
+	log   *progress.Log
+	total int64
+	n     int64
+	last  time.Time
+}
+
+func (b *barWriter) Write(p []byte) (int, error) {
+	b.n += int64(len(p))
+	if time.Since(b.last) >= 250*time.Millisecond {
+		b.last = time.Now()
+		b.log.Download(b.n, b.total)
+	}
+	return len(p), nil
+}
+
+func (b *barWriter) done() { b.log.Download(b.n, b.total) }
 
 // Uninstall removes an added module with zpkg (its data under
 // /DATA/AppData stays, as lintux' installer relies on).
@@ -960,10 +1023,10 @@ func (c *Catalog) Uninstall(ctx context.Context, name string) error {
 	if !c.isInstalled(name) {
 		return ErrNotInstalled
 	}
-	if _, err := c.Run(ctx, "zpkg", "remove", name); err != nil {
+	if _, err := c.change(ctx, "zpkg", "remove", name); err != nil {
 		return err
 	}
-	_, err := c.Run(ctx, "systemctl", "daemon-reload")
+	_, err := c.change(ctx, "systemctl", "daemon-reload")
 	return err
 }
 
