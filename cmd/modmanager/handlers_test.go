@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/chicohaager/modmanager/internal/catalog"
+	"github.com/chicohaager/modmanager/internal/loops"
 	"github.com/chicohaager/modmanager/internal/progress"
 	"github.com/chicohaager/modmanager/internal/state"
 	"github.com/chicohaager/modmanager/internal/sysapps"
@@ -377,5 +380,33 @@ func TestAppActionsRunAsAJob(t *testing.T) {
 	do(t, mux, http.MethodPost, "/modmanager/apps/hide", `{"id":"module:icewhale_photos"}`, nil)
 	if s2 := jobs.Snapshot(); s2.ID <= s.ID || s2.OK || len(s2.Lines) != 1 || s2.Lines[0].Kind != progress.Err {
 		t.Fatalf("failed hide %+v", s2)
+	}
+}
+
+// GET /modmanager/loops needs a token and reports a fresh measurement.
+func TestLoopsRouteMeasures(t *testing.T) {
+	old := loopSys
+	t.Cleanup(func() { loopSys = old })
+	loopSys = t.TempDir()
+	for i, f := range []string{"/zfw.raw", "/zfw.raw", "/cron.raw"} {
+		d := filepath.Join(loopSys, fmt.Sprintf("loop%d", i), "loop")
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "backing_file"), []byte(f+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mux := newMux(&fakeSvc{}, &fakeCat{}, requireToken)
+	req := httptest.NewRequest(http.MethodGet, "/modmanager/loops", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("without token: %d", w.Code)
+	}
+	w = do(t, mux, http.MethodGet, "/modmanager/loops", "", nil)
+	var st loops.Stats
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &st) != nil || st.Loops != 3 || st.Images != 2 || st.OldStates != 1 {
+		t.Fatalf("%d %s", w.Code, w.Body)
 	}
 }

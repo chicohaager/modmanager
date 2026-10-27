@@ -20,7 +20,9 @@ import (
 	"github.com/chicohaager/lintux-modkit/gateway"
 	"github.com/chicohaager/lintux-modkit/httpx"
 	"github.com/chicohaager/lintux-modkit/watchdog"
+	"github.com/chicohaager/lintux-modkit/ysk"
 	"github.com/chicohaager/modmanager/internal/catalog"
+	"github.com/chicohaager/modmanager/internal/loops"
 	"github.com/chicohaager/modmanager/internal/progress"
 	"github.com/chicohaager/modmanager/internal/state"
 	"github.com/chicohaager/modmanager/internal/sysapps"
@@ -78,6 +80,12 @@ func main() {
 		Lang:     func() string { return updates.ReadLang(langDir) },
 	}
 	go updates.Run(context.Background(), card, cat, version, 2*time.Minute, 12*time.Hour, time.Hour)
+	// Loop devices of old system-extension states: a card while they pile up (internal/loops).
+	go loops.Run(context.Background(), &loops.Keeper{
+		Notifier: ysk.Notifier{BusURLFile: updates.DefaultBusURLFile},
+		Lang:     func() string { return updates.ReadLang(langDir) },
+		Sys:      loops.DefaultSysBlock,
+	})
 	onCatalogChange = card.Kick
 
 	srv := &http.Server{

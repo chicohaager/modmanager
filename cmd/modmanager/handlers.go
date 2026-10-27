@@ -10,6 +10,7 @@ import (
 
 	"github.com/chicohaager/lintux-modkit/httpx"
 	"github.com/chicohaager/modmanager/internal/catalog"
+	"github.com/chicohaager/modmanager/internal/loops"
 	"github.com/chicohaager/modmanager/internal/progress"
 	"github.com/chicohaager/modmanager/internal/state"
 	"github.com/chicohaager/modmanager/internal/sysapps"
@@ -64,6 +65,7 @@ func newMux(svc appService, cat catalogService, verify func(http.Handler) http.H
 	mux.Handle(routePrefix+"/ui-lang", logged(verify(uiLangHandler())))
 	// Not logged: the page asks about twice a second while an action runs.
 	mux.Handle(routePrefix+"/progress", verify(progressHandler()))
+	mux.Handle(routePrefix+"/loops", logged(verify(loopsHandler())))
 	return mux
 }
 
@@ -228,6 +230,25 @@ func catalogActionHandler(cat catalogService, action string) http.HandlerFunc {
 			return
 		}
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"entries": entries, "repos": repos})
+	}
+}
+
+// loopSys is where loopsHandler reads the loop devices; tests point it into a temp dir.
+var loopSys = loops.DefaultSysBlock
+
+// loopsHandler measures the loop devices old system-extension states hold (internal/loops).
+func loopsHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			httpx.MethodNotAllowed(w)
+			return
+		}
+		st, err := loops.Measure(loopSys)
+		if err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "internal", err.Error())
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, st)
 	}
 }
 
