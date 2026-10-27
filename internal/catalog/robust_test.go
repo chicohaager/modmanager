@@ -37,9 +37,8 @@ func TestArm64DoesNotTakeTheAmd64Alias(t *testing.T) {
 	}
 }
 
-// An update removes the installed module before installing the new image (zpkg
-// refuses a second image of the same name): when that install fails, the previous
-// image goes back, so a failed update never leaves the module removed.
+// An update swaps the image with zpkg install --force: when that fails, the previous
+// image goes back the same way, so a failed update leaves the module as it was.
 func TestAFailedUpdatePutsThePreviousImageBack(t *testing.T) {
 	c, g, rec := setup(t)
 	old, img := "squashfs-cron-v1", "squashfs-cron-v2"
@@ -86,5 +85,55 @@ func TestACanceledFetchIsNotCached(t *testing.T) {
 	}
 	if _, _, err := c.latest(context.Background(), "lintux/cron", false); err != nil {
 		t.Fatalf("the next request got the canceled one's error: %v", err)
+	}
+}
+
+// One refresh instead of two (KB §79.15): an update never runs zpkg remove, and it does
+// to the services what remove + install did — stop what only the old image had, restart
+// what runs (try-restart leaves a service the user turned off alone), start the services
+// of the module's manifest.
+func TestAnUpdateSwapsWithOneRefreshAndRestartsTheServices(t *testing.T) {
+	c, g, rec := setup(t)
+	old, img := "squashfs-cron-v1", "squashfs-cron-v2"
+	rec.lists = map[string]string{
+		old: "squashfs-root/usr/lib/systemd/system/cron.service\nsquashfs-root/usr/lib/systemd/system/cron-old.service\nsquashfs-root/usr/lib/systemd/system/cron-job@.service\n",
+		img: "squashfs-root/usr/lib/systemd/system/cron.service\nsquashfs-root/usr/lib/systemd/system/cron-job@.service\nsquashfs-root/usr/lib/systemd/system/cron-web.service\n",
+	}
+	rec.instances = map[string]string{"cron-job@*.service": "cron-job@daily.service loaded active running Job\n"}
+	must(t, os.WriteFile(filepath.Join(rec.ext, "cron.raw"), []byte(old), 0o644))
+	must(t, os.MkdirAll(filepath.Join(c.Root, "usr/share/casaos/modules"), 0o755))
+	must(t, os.WriteFile(filepath.Join(c.Root, "usr/share/casaos/modules/cron.json"), []byte(`{"name":"cron","services":[{"name":"cron"},{"name":"bad;name"}]}`), 0o644))
+	g.releases["lintux/cron"] = map[string]string{"cron-amd64.raw": img, "cron-amd64.raw.sha256": sum(img)}
+	must(t, c.Install(context.Background(), "gh:lintux/cron"))
+	if rec.has("zpkg remove") {
+		t.Fatalf("update ran zpkg remove (a second refresh): %v", rec.cmds)
+	}
+	var tail []string
+	for _, cmd := range rec.cmds {
+		if strings.HasPrefix(cmd, "zpkg") || strings.HasPrefix(cmd, "systemctl stop") || strings.HasPrefix(cmd, "systemctl try-restart") || strings.HasPrefix(cmd, "systemctl start") {
+			tail = append(tail, cmd)
+		}
+	}
+	want := []string{
+		"zpkg install --force " + filepath.Join(c.StateDir, "downloads", "cron.raw"),
+		"systemctl stop cron-old.service",
+		"systemctl try-restart cron.service cron-job@daily.service cron-web.service",
+		"systemctl start cron.service",
+	}
+	if strings.Join(tail, "|") != strings.Join(want, "|") {
+		t.Fatalf("commands\n got %v\nwant %v", tail, want)
+	}
+	if b, _ := os.ReadFile(filepath.Join(rec.ext, "cron.raw")); string(b) != img {
+		t.Errorf("installed %q, want the new image", b)
+	}
+}
+
+// A first install is one plain zpkg install: nothing to restart, no --force.
+func TestAFirstInstallIsOnePlainInstall(t *testing.T) {
+	c, g, rec := setup(t)
+	g.releases["lintux/cron"] = map[string]string{"cron-amd64.raw": "img", "cron-amd64.raw.sha256": sum("img")}
+	must(t, c.Install(context.Background(), "gh:lintux/cron"))
+	if !rec.has("zpkg install "+filepath.Join(c.StateDir, "downloads", "cron.raw")) || rec.has("zpkg install --force") || rec.has("systemctl try-restart") {
+		t.Fatalf("commands %v", rec.cmds)
 	}
 }

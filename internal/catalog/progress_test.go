@@ -39,7 +39,7 @@ func TestInstallReportsEveryStep(t *testing.T) {
 	want := []string{
 		"step release", "step image", "step download", "bar download", "ok checksum",
 		"step collisions", "ok noCollision", "step keep",
-		"cmd zpkg remove cron", "cmd zpkg install " + dl, "cmd systemctl daemon-reload",
+		"cmd zpkg install --force " + dl, "cmd systemctl daemon-reload", "step services",
 	}
 	if got := lines(c.Progress); strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("progress\n got %v\nwant %v", got, want)
@@ -97,7 +97,7 @@ func TestFailedInstallReportsTheWayBack(t *testing.T) {
 		t.Fatal("install of a broken image succeeded")
 	}
 	got := strings.Join(lines(c.Progress), "|")
-	if !strings.Contains(got, "|out install failed|err wayBack|cmd zpkg install ") || !strings.HasSuffix(got, "|err failed") {
+	if !strings.Contains(got, "|out install failed|err wayBack|cmd zpkg install --force ") || !strings.HasSuffix(got, "|err failed") {
 		t.Fatalf("progress %s", got)
 	}
 	if s := c.Progress.Snapshot(); s.OK || s.Running {

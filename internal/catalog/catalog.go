@@ -106,7 +106,7 @@ type Entry struct {
 	// RestartNeeded: the module's health route reports "binary":"replaced" — its
 	// file is newer than the running process (after `zpkg install --force`, which
 	// does not restart the service; lintux-modkit webmod, measured on 1.8.0). A
-	// reinstall here goes through zpkg remove + install, which restarts it.
+	// reinstall here restarts it (Catalog.update: try-restart after the swap).
 	RestartNeeded bool `json:"restart_needed,omitempty"`
 	// StaleUnits: the module's services whose process runs other bytes than the
 	// program file its ExecStart names — measured here, so it works for every
@@ -826,41 +826,156 @@ func (c *Catalog) installRepo(ctx context.Context, repo string) error {
 	if err := c.checkCollisions(ctx, name, dst); err != nil {
 		return err
 	}
-	var previous string
-	if c.isInstalled(name) {
-		// zpkg refuses a second image of the same name, so the installed one is
-		// removed first; a copy (as zpkg wants it: <name>.raw) is the way back.
-		previous = filepath.Join(dir, "previous", name+".raw")
-		if err := os.MkdirAll(filepath.Dir(previous), 0o700); err != nil {
+	if !c.isInstalled(name) {
+		if _, err := c.change(ctx, "zpkg", "install", dst); err != nil {
 			return err
 		}
-		defer func() { _ = os.RemoveAll(filepath.Dir(previous)) }()
-		p.Stepf("keep", "Keeping a copy of the installed image for the way back")
-		if err := copyFile(c.installedFile(name), previous); err != nil {
-			return fmt.Errorf("no copy of the installed image for the way back: %w", err)
-		}
-		if _, err := c.change(ctx, "zpkg", "remove", name); err != nil {
-			return err
-		}
+		_, err = c.change(ctx, "systemctl", "daemon-reload")
+		return err
 	}
-	if out, err := c.change(ctx, "zpkg", "install", dst); err != nil {
-		if previous == "" {
-			return err
-		}
+	return c.update(ctx, name, dir, dst)
+}
+
+// update replaces an installed module with one `zpkg install --force` instead of
+// `zpkg remove` + `zpkg install`: every systemd-sysext refresh leaves one loop device per
+// extension behind until the next boot, and remove + install are two refreshes
+// (measured on ZimaOS 1.8.0, KB §79.15: +18 and +19; --force: +19). --force does not
+// restart the module's services (KB §79.13), so update does what remove + install
+// did: it stops the services only the old image had, restarts the running ones and
+// starts the services the module's manifest names. A copy of the installed image is
+// the way back.
+func (c *Catalog) update(ctx context.Context, name, dir, dst string) error {
+	p := c.Progress
+	previous := filepath.Join(dir, "previous", name+".raw") // zpkg takes the module name from the file name
+	if err := os.MkdirAll(filepath.Dir(previous), 0o700); err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(filepath.Dir(previous)) }()
+	p.Stepf("keep", "Keeping a copy of the installed image for the way back")
+	if err := copyFile(c.installedFile(name), previous); err != nil {
+		return fmt.Errorf("no copy of the installed image for the way back: %w", err)
+	}
+	oldFiles, err := c.imageFiles(ctx, previous)
+	if err != nil {
+		return err
+	}
+	if out, err := c.change(ctx, "zpkg", "install", "--force", dst); err != nil {
 		failed := fmt.Errorf("zpkg install: %v %s", err, strings.TrimSpace(string(out)))
 		p.Errf("wayBack", "zpkg install failed; installing the previous version again")
-		// the way back also when the request was canceled: the module must not stay removed
+		// the way back also when the request was canceled: the module must stay as it was
 		bctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 		defer cancel()
-		if _, rerr := c.change(bctx, "zpkg", "install", previous); rerr != nil {
+		if _, rerr := c.change(bctx, "zpkg", "install", "--force", previous); rerr != nil {
 			return fmt.Errorf("%w; the previous version could not be installed again: %v", failed, rerr)
 		}
 		_, _ = c.change(bctx, "systemctl", "daemon-reload")
+		c.restartServices(bctx, name, oldFiles, oldFiles)
 		return fmt.Errorf("%w; the previous version installed again", failed)
 	}
-	_, err = c.change(ctx, "systemctl", "daemon-reload")
-	return err
+	if _, err := c.change(ctx, "systemctl", "daemon-reload"); err != nil {
+		return err
+	}
+	newFiles, err := c.imageFiles(ctx, c.installedFile(name))
+	if err != nil {
+		return err
+	}
+	return c.restartServices(ctx, name, oldFiles, newFiles)
 }
+
+// restartServices does for an image swapped with --force what zpkg remove + install
+// does to the module's services: stop what the old image had and the new one has not,
+// restart what runs (systemctl try-restart leaves a service the user turned off alone)
+// and start the services of the module's manifest.
+func (c *Catalog) restartServices(ctx context.Context, name string, oldFiles, newFiles []string) error {
+	c.Progress.Stepf("services", "Restarting the module's services")
+	newUnits := map[string]bool{}
+	for _, u := range unitFiles(newFiles) {
+		newUnits[u] = true
+	}
+	var errs []error
+	for _, u := range unitFiles(oldFiles) {
+		if !newUnits[u] && !strings.HasSuffix(u, "@.service") {
+			if _, err := c.change(ctx, "systemctl", "stop", u); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	if running := c.runningUnits(ctx, unitFiles(newFiles)); len(running) > 0 {
+		if _, err := c.change(ctx, "systemctl", append([]string{"try-restart"}, running...)...); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	for _, s := range c.manifestServices(name) {
+		if _, err := c.change(ctx, "systemctl", "start", s); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// unitFiles lists the service unit files in an image's file list (base names;
+// templates as name@.service).
+func unitFiles(files []string) []string {
+	var units []string
+	for _, f := range files {
+		dir, base := path.Split(f)
+		if dir == "/usr/lib/systemd/system/" && strings.HasSuffix(base, ".service") {
+			units = append(units, base)
+		}
+	}
+	return units
+}
+
+// runningUnits expands templates to their running instances and keeps the plain units.
+func (c *Catalog) runningUnits(ctx context.Context, units []string) []string {
+	var out []string
+	for _, base := range units {
+		tmpl, ok := strings.CutSuffix(base, "@.service")
+		if !ok {
+			out = append(out, base)
+			continue
+		}
+		list, err := c.Run(ctx, "systemctl", "list-units", "--plain", "--no-legend", "--state=running", tmpl+"@*.service")
+		if err != nil {
+			continue
+		}
+		for _, l := range strings.Split(string(list), "\n") {
+			if u := strings.Fields(l); len(u) > 0 && strings.HasPrefix(u[0], tmpl+"@") {
+				out = append(out, u[0])
+			}
+		}
+	}
+	return out
+}
+
+// manifestServices names the services of the module's merged manifest
+// (/usr/share/casaos/modules/<name>.json), which zpkg starts on install.
+func (c *Catalog) manifestServices(name string) []string {
+	b, err := os.ReadFile(filepath.Join(c.Root, "usr/share/casaos/modules", name+".json"))
+	if err != nil {
+		return nil
+	}
+	var m struct {
+		Services []struct {
+			Name string `json:"name"`
+		} `json:"services"`
+	}
+	if json.Unmarshal(b, &m) != nil {
+		return nil
+	}
+	var out []string
+	for _, s := range m.Services {
+		if s.Name != "" && unitName.MatchString(s.Name) {
+			if !strings.Contains(s.Name, ".") {
+				s.Name += ".service"
+			}
+			out = append(out, s.Name)
+		}
+	}
+	return out
+}
+
+var unitName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.@-]{0,127}$`)
 
 // change runs a command that changes the host and reports it with its output.
 func (c *Catalog) change(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -1015,26 +1130,7 @@ func (c *Catalog) staleUnits(ctx context.Context, name string) []string {
 		return nil
 	}
 	sysctl := func(ctx context.Context, args ...string) ([]byte, error) { return c.Run(ctx, "systemctl", args...) }
-	var units []string
-	for _, f := range files {
-		dir, base := path.Split(f)
-		if dir != "/usr/lib/systemd/system/" || !strings.HasSuffix(base, ".service") {
-			continue
-		}
-		if tmpl, ok := strings.CutSuffix(base, "@.service"); ok {
-			out, err := sysctl(ctx, "list-units", "--plain", "--no-legend", "--state=running", tmpl+"@*.service")
-			if err != nil {
-				continue
-			}
-			for _, l := range strings.Split(string(out), "\n") {
-				if u := strings.Fields(l); len(u) > 0 && strings.HasPrefix(u[0], tmpl+"@") {
-					units = append(units, u[0])
-				}
-			}
-			continue
-		}
-		units = append(units, base)
-	}
+	units := c.runningUnits(ctx, unitFiles(files))
 	if len(units) == 0 {
 		return nil
 	}
