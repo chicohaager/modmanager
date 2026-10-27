@@ -46,8 +46,8 @@ type Snapshot struct {
 	Target  string    `json:"target,omitempty"`
 	Running bool      `json:"running"`
 	OK      bool      `json:"ok"`
-	Started time.Time `json:"started,omitempty"`
-	Ended   time.Time `json:"ended,omitempty"`
+	Started time.Time `json:"started,omitzero"`
+	Ended   time.Time `json:"ended,omitzero"`
 	Rev     int64     `json:"rev"`
 	Dropped int       `json:"dropped,omitempty"`
 	Lines   []Line    `json:"lines"`
