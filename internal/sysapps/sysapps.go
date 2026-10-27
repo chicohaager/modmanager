@@ -37,6 +37,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chicohaager/modmanager/internal/progress"
 	"github.com/chicohaager/modmanager/internal/state"
 )
 
@@ -185,7 +186,15 @@ type Manager struct {
 	// HostNS reports an error when the process does not share the host's
 	// mount namespace; tests replace it. nil means SameMountNamespace.
 	HostNS func() error
+	// Stream runs the commands that change the host with live output for the progress
+	// log of the request (progress.FromContext); nil: through Run.
+	Stream progress.Stream
 	mu     sync.Mutex
+}
+
+// change runs a command that changes the host and reports it in the request's progress log.
+func (m *Manager) change(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return progress.FromContext(ctx).Exec(ctx, m.Stream, m.Run, name, args...)
 }
 
 // ErrNamespace: a refresh from a private mount namespace changes nothing the
@@ -593,12 +602,15 @@ func (m *Manager) saveManifest(name string) error {
 }
 
 func (m *Manager) hideSysext(ctx context.Context, a *App) error {
+	p := progress.FromContext(ctx)
+	p.Stepf("keepManifest", "Keeping the app's manifest for Restore")
 	if err := m.saveManifest(a.Name); err != nil {
 		return err
 	}
 	for _, s := range a.Services {
-		_, _ = m.Run(ctx, "systemctl", "stop", s.Unit)
+		_, _ = m.change(ctx, "systemctl", "stop", s.Unit)
 	}
+	p.Stepf("mask", "Masking the system extension {name}", "name", a.Name)
 	if err := os.MkdirAll(filepath.Join(m.P.EtcExt, a.Name), 0o755); err != nil {
 		return err
 	}
@@ -607,6 +619,7 @@ func (m *Manager) hideSysext(ctx context.Context, a *App) error {
 
 func (m *Manager) restoreSysext(ctx context.Context, a *App) error {
 	mask := filepath.Join(m.P.EtcExt, a.Name)
+	progress.FromContext(ctx).Stepf("unmask", "Removing the mask of {name}", "name", a.Name)
 	if isDir(mask) {
 		// os.Remove refuses a non-empty directory: a mask someone filled is not ours.
 		if err := os.Remove(mask); err != nil {
@@ -617,20 +630,21 @@ func (m *Manager) restoreSysext(ctx context.Context, a *App) error {
 		return err
 	}
 	for _, s := range a.Services {
-		_, _ = m.Run(ctx, "systemctl", "start", s.Unit)
+		_, _ = m.change(ctx, "systemctl", "start", s.Unit)
 	}
 	return nil
 }
 
 func (m *Manager) hideBase(ctx context.Context, a *App) error {
+	progress.FromContext(ctx).Stepf("overlay", "Writing the overlay that hides {name}", "name", a.Name)
 	if err := m.writeOverlay(ctx, a.Name); err != nil {
 		return err
 	}
 	for _, s := range a.Services {
-		if _, err := m.Run(ctx, "systemctl", "disable", "--now", s.Unit); err != nil {
+		if _, err := m.change(ctx, "systemctl", "disable", "--now", s.Unit); err != nil {
 			return err
 		}
-		if _, err := m.Run(ctx, "systemctl", "mask", s.Unit); err != nil {
+		if _, err := m.change(ctx, "systemctl", "mask", s.Unit); err != nil {
 			return err
 		}
 	}
@@ -638,6 +652,7 @@ func (m *Manager) hideBase(ctx context.Context, a *App) error {
 }
 
 func (m *Manager) restoreBase(ctx context.Context, a *App) error {
+	progress.FromContext(ctx).Stepf("removeOverlay", "Removing the overlay of {name}", "name", a.Name)
 	if err := os.Remove(m.overlayManifest(a.Name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
@@ -648,10 +663,10 @@ func (m *Manager) restoreBase(ctx context.Context, a *App) error {
 		return err
 	}
 	for _, s := range a.Services {
-		if _, err := m.Run(ctx, "systemctl", "unmask", s.Unit); err != nil {
+		if _, err := m.change(ctx, "systemctl", "unmask", s.Unit); err != nil {
 			return err
 		}
-		if _, err := m.Run(ctx, "systemctl", "enable", "--now", s.Unit); err != nil {
+		if _, err := m.change(ctx, "systemctl", "enable", "--now", s.Unit); err != nil {
 			return err
 		}
 	}
@@ -746,10 +761,11 @@ func (m *Manager) Reconcile(ctx context.Context) ([]string, error) {
 }
 
 func (m *Manager) refresh(ctx context.Context) error {
-	if _, err := m.Run(ctx, "systemd-sysext", "refresh"); err != nil {
+	progress.FromContext(ctx).Stepf("refresh", "ZimaOS merges its system extensions again")
+	if _, err := m.change(ctx, "systemd-sysext", "refresh"); err != nil {
 		return err
 	}
-	_, err := m.Run(ctx, "systemctl", "daemon-reload")
+	_, err := m.change(ctx, "systemctl", "daemon-reload")
 	return err
 }
 
@@ -882,8 +898,16 @@ func (m *Manager) setDeny(ctx context.Context, resource string, deny bool) error
 			return fmt.Errorf("%w: %w", ErrBlocked, err)
 		}
 	}
-	if _, err := m.backupUserDB(ctx); err != nil {
+	p := progress.FromContext(ctx)
+	dst, err := m.backupUserDB(ctx)
+	if err != nil {
 		return err
+	}
+	p.Okf("userdbBackup", "User database backed up: {path}", "path", dst)
+	if deny {
+		p.Stepf("tileHide", "Hiding the tile for every user in the ZimaOS user database")
+	} else {
+		p.Stepf("tileShow", "Showing the tile again in the ZimaOS user database")
 	}
 	var q strings.Builder
 	q.WriteString("begin;")
@@ -902,7 +926,7 @@ func (m *Manager) setDeny(ctx context.Context, resource string, deny bool) error
 		fmt.Fprintf(&q, "delete from permission_tuples where namespace='app' and object_id='%s' and relation='visible' and effect='deny';", resource)
 	}
 	q.WriteString("update permission_generation set value=value+1, updated_at=datetime('now');commit;")
-	_, err := m.sql(ctx, q.String())
+	_, err = m.sql(ctx, q.String())
 	return err
 }
 
@@ -932,6 +956,8 @@ func (m *Manager) Purge(ctx context.Context, id, confirm string) error {
 	if a.Data == nil || !a.Data.Exists {
 		return nil
 	}
+	p := progress.FromContext(ctx)
+	p.Stepf("mediaCheck", "Looking for photos or videos in {path}", "path", a.Data.Path)
 	f, err := findMedia(a.Data.Path)
 	if err != nil {
 		// A subtree the walk cannot read is one it cannot vouch for.
@@ -940,6 +966,8 @@ func (m *Manager) Purge(ctx context.Context, id, confirm string) error {
 	if f != "" {
 		return fmt.Errorf("%w: %s", ErrMedia, f)
 	}
+	p.Okf("noMedia", "No photo or video found")
+	p.Stepf("delete", "Deleting {path}", "path", a.Data.Path)
 	return os.RemoveAll(a.Data.Path)
 }
 

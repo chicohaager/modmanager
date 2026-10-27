@@ -117,6 +117,9 @@ func actionHandler(svc appService, action string) http.HandlerFunc {
 		defer cancel()
 		actionMu.Lock()
 		defer actionMu.Unlock()
+		// sysapps reports through the context: Reconcile at start runs the same code without a job.
+		jobs.Start(action, req.ID)
+		ctx = progress.NewContext(ctx, jobs)
 		var err error
 		switch action {
 		case "hide":
@@ -126,6 +129,7 @@ func actionHandler(svc appService, action string) http.HandlerFunc {
 		case "purge":
 			err = svc.Purge(ctx, req.ID, req.Confirm)
 		}
+		jobs.Finish(err)
 		if err != nil {
 			log.Printf("[modmanager] %s %s: %v", action, req.ID, err)
 			writeServiceError(w, err)

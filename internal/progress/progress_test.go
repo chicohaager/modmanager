@@ -1,6 +1,7 @@
 package progress
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -124,5 +125,41 @@ func TestNoJobHasNoTimes(t *testing.T) {
 	b, _ = json.Marshal(l.Snapshot())
 	if !strings.Contains(string(b), `"started"`) || strings.Contains(string(b), "ended") {
 		t.Fatalf("running job %s", b)
+	}
+}
+
+// Lines that come while no job runs are dropped (Reconcile at start, a late command).
+func TestLinesOutsideAJobAreDropped(t *testing.T) {
+	var l Log
+	l.Stepf("refresh", "x")
+	l.Start("hide", "a")
+	l.Finish(nil)
+	l.Command("systemd-sysext", "refresh")
+	s := l.Snapshot()
+	if got := kinds(s); got != "ok" {
+		t.Fatalf("kinds %q, want only the job's own result", got)
+	}
+}
+
+func TestContextCarriesTheLog(t *testing.T) {
+	if FromContext(context.Background()) != nil {
+		t.Fatal("log without NewContext")
+	}
+	l := &Log{}
+	if FromContext(NewContext(context.Background(), l)) != l {
+		t.Fatal("NewContext lost the log")
+	}
+}
+
+// A failing streamed command names itself and the end of its output, like ExecRunner.
+func TestExecStreamErrorNamesTheCommandAndItsOutput(t *testing.T) {
+	var l Log
+	l.Start("hide", "a")
+	_, err := l.Exec(context.Background(), ExecStream, nil, "sh", "-c", "echo merging; echo broken >&2; exit 3")
+	if err == nil || !strings.Contains(err.Error(), "sh -c") || !strings.Contains(err.Error(), "exit status 3") || !strings.Contains(err.Error(), "broken") {
+		t.Fatalf("err %v", err)
+	}
+	if got := kinds(l.Snapshot()); got != "cmd,out,out" {
+		t.Fatalf("kinds %s", got)
 	}
 }

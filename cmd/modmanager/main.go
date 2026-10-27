@@ -21,6 +21,7 @@ import (
 	"github.com/chicohaager/lintux-modkit/httpx"
 	"github.com/chicohaager/lintux-modkit/watchdog"
 	"github.com/chicohaager/modmanager/internal/catalog"
+	"github.com/chicohaager/modmanager/internal/progress"
 	"github.com/chicohaager/modmanager/internal/state"
 	"github.com/chicohaager/modmanager/internal/sysapps"
 	"github.com/chicohaager/modmanager/internal/updates"
@@ -55,6 +56,7 @@ func main() {
 	}
 
 	mgr := sysapps.New()
+	mgr.Stream = progress.ExecStream
 	go reconcile(mgr)
 
 	var lc net.ListenConfig
@@ -66,7 +68,7 @@ func main() {
 	go registerRoute(runtimePath, "http://"+listener.Addr().String())
 
 	cat := catalog.New(sysapps.ExecRunner)
-	cat.Stream, cat.Progress = catalog.ExecStream, jobs
+	cat.Stream, cat.Progress = progress.ExecStream, jobs
 	// Module updates on the dashboard: the first check two minutes after the
 	// start (the gateway and /DATA come late at boot), then every 12 hours,
 	// hourly while updates wait — the catalog asks GitHub once per repository
