@@ -44,38 +44,32 @@ func (c *Catalog) Self(ctx context.Context, installed string) SelfStatus {
 func (c *Catalog) selfDir() string { return filepath.Join(c.StateDir, "self-update") }
 
 // selfScript runs in a transient unit (systemd-run), outside Module Manager's own
-// service: `zpkg remove modmanager` takes /usr/bin/modmanager and its unit away.
-// zpkg starts the module's service again on install (ZimaOS 1.8.0, KB §79.8).
-// A failed install of the new image puts the previous one back. A failed remove
-// that left the installed image in place stops there (nothing is installed over
-// it); the last line of the log is the result: ok, remove-failed, rolled-back or
-// rollback-failed.
+// service, which it restarts. It swaps the image with one `zpkg install --force` (one
+// systemd-sysext refresh; remove + install were two, and every refresh leaves its loop
+// devices behind while processes of the old /usr run, KB §79.15). --force does not
+// restart the service (KB §79.13), so the script does. A failed swap puts the previous
+// image back the same way; the last line of the log is the result: ok, rolled-back or
+// rollback-failed. E is kept for the message of a failed way back.
 const selfScript = `#!/bin/sh
 # Written by Module Manager: replaces itself with the new image, rolls back on failure.
 D=%q
 E=%q
 exec >"$D/log" 2>&1
 sleep 2
-echo "remove $(date)"
-if ! zpkg remove modmanager; then
-  if [ -e "$E/modmanager.raw" ]; then
-    echo "remove failed, the installed version stays"
-    echo "result remove-failed"
-    exit 1
-  fi
-  echo "remove failed, but the image is gone (continuing)"
-fi
-if zpkg install "$D/new/modmanager.raw"; then
+echo "swap $(date)"
+if zpkg install --force "$D/new/modmanager.raw"; then
   systemctl daemon-reload
+  systemctl restart modmanager.service
   rm -f "$D/new/modmanager.raw"  # zpkg copied it to /var/lib/extensions; previous/ stays as the way back
   echo "result ok"
 else
   echo "install of the new image failed, rolling back"
-  if zpkg install "$D/previous/modmanager.raw"; then
+  if zpkg install --force "$D/previous/modmanager.raw"; then
     systemctl daemon-reload
+    systemctl restart modmanager.service
     echo "result rolled-back"
   else
-    echo "result rollback-failed: Module Manager is not installed; install $D/previous/modmanager.raw by hand (zpkg install)"
+    echo "result rollback-failed: install $D/previous/modmanager.raw by hand (zpkg install --force, then systemctl restart modmanager); installed now: $E/modmanager.raw"
     exit 1
   fi
 fi

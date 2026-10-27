@@ -78,8 +78,6 @@ func TestSelfUpdateScriptRollsBack(t *testing.T) {
 	}{
 		{"new installs", "", "result ok", "new/modmanager.raw"},
 		{"new fails", "*new/modmanager.raw*", "result rolled-back", "previous/modmanager.raw"},
-		// remove failed: the installed version stays, nothing is installed over it
-		{"remove fails", `*"remove modmanager"*`, "result remove-failed", ""},
 		// the way back failed too: the log must not claim a rollback
 		{"rollback fails", "*new/modmanager.raw*|*previous/modmanager.raw*", "result rollback-failed", "previous/modmanager.raw"},
 	} {
@@ -101,7 +99,7 @@ func TestSelfUpdateScriptRollsBack(t *testing.T) {
 			cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
 			// the transient unit fails (and shows as failed) when Module Manager may be gone
 			sout, err := cmd.CombinedOutput()
-			wantFail := tc.result == "result remove-failed" || tc.result == "result rollback-failed"
+			wantFail := tc.result == "result rollback-failed"
 			if (err != nil) != wantFail {
 				t.Fatalf("script: err %v (want failure %v) %s", err, wantFail, sout)
 			}
@@ -117,12 +115,12 @@ func TestSelfUpdateScriptRollsBack(t *testing.T) {
 					lastInstall = l
 				}
 			}
-			if tc.installedLast == "" {
-				if lastInstall != "" {
-					t.Fatalf("calls:\n%s\nwant no install after a failed remove", calls)
-				}
-			} else if !strings.HasSuffix(lastInstall, tc.installedLast) || !strings.Contains(string(calls), "zpkg remove modmanager") {
-				t.Fatalf("calls:\n%s\nwant remove and last install of %s", calls, tc.installedLast)
+			// one refresh per swap: never zpkg remove, always --force; the service is restarted after a swap that took
+			if strings.Contains(string(calls), "zpkg remove") || !strings.HasPrefix(lastInstall, "zpkg install --force ") || !strings.HasSuffix(lastInstall, tc.installedLast) {
+				t.Fatalf("calls:\n%s\nwant only zpkg install --force, the last of %s", calls, tc.installedLast)
+			}
+			if restarted := strings.Contains(string(calls), "systemctl restart modmanager.service"); restarted != (tc.result != "result rollback-failed") {
+				t.Fatalf("calls:\n%s\nrestart of modmanager.service: %v after %q", calls, restarted, tc.result)
 			}
 			// zpkg copied the new image to /var/lib/extensions (measured .184): after success the staged copy goes,
 			// the previous one stays as the way back; after a rollback both stay for a look.
