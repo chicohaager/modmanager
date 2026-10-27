@@ -3,7 +3,9 @@
 //   2. every key app.js asks for with t()/th() and every data-i18n* key of index.html exists;
 //   3. every error code the Go backend can send (WriteError codes, catalog errorCode, sysapps
 //      blocked codes) has a text — read from the Go sources, so a new code fails here;
-//   4. every visible text of index.html carries a data-i18n* key (product names excepted).
+//   4. every visible text of index.html carries a data-i18n* key (product names excepted);
+//   5. every progress key the backend reports (Stepf/Okf/Errf, progress.go) and the page adds
+//      (termSay) has a pg.* text.
 // Exit 1 with the list of what is missing.
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
@@ -44,6 +46,10 @@ const fn = cat.slice(cat.indexOf('func errorCode('), cat.indexOf('// ParseRepo a
 for (const m of fn.matchAll(/return "(\w+)"/g)) goCodes.add(m[1]);
 for (const m of cat.matchAll(/e\.ErrorCode = [^\n]*"(\w+)"\n/g)) goCodes.add(m[1]);
 for (const c of goCodes) need(`code.${c}`, 'Go error code');
+// progress lines (terminal panel): every key the backend reports and every key the page adds
+for (const f of ['internal/catalog/catalog.go', 'internal/catalog/self.go']) for (const m of read(f).matchAll(/\.(?:Stepf|Okf|Errf)\("(\w+)"/g)) need(`pg.${m[1]}`, `${f} progress key`);
+for (const m of read('internal/progress/progress.go').matchAll(/Key: "(\w+)"/g)) need(`pg.${m[1]}`, 'progress.go key');
+for (const m of app.matchAll(/termSay\('\w+', '(\w+)'/g)) need(`pg.${m[1]}`, 'app.js termSay');
 const sys = read('internal/sysapps/sysapps.go');
 for (const m of sys.matchAll(/BlockedCode = [^\n]*"(\w+)"/g)) need(`blocked.${m[1]}`, 'sysapps blocked code');
 for (const m of sys.matchAll(/return "(\w+)"\n/g)) need(`blocked.${m[1]}`, 'sysapps blockedCode()');

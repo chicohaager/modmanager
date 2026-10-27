@@ -66,6 +66,7 @@ func main() {
 	go registerRoute(runtimePath, "http://"+listener.Addr().String())
 
 	cat := catalog.New(sysapps.ExecRunner)
+	cat.Stream, cat.Progress = catalog.ExecStream, jobs
 	// Module updates on the dashboard: the first check two minutes after the
 	// start (the gateway and /DATA come late at boot), then every 12 hours,
 	// hourly while updates wait — the catalog asks GitHub once per repository

@@ -86,6 +86,7 @@ fi
 // swap to a transient unit. It returns the release tag; the UI then waits until
 // /modmanager/health answers with the new version.
 func (c *Catalog) SelfUpdate(ctx context.Context, installed string) (string, error) {
+	c.Progress.Stepf("release", "Asking GitHub for the latest release of {repo}", "repo", SelfRepo)
 	rel, _, err := c.latest(ctx, SelfRepo, true)
 	if err != nil {
 		return "", err
@@ -100,6 +101,7 @@ func (c *Catalog) SelfUpdate(ctx context.Context, installed string) (string, err
 	if name != "modmanager" {
 		return "", fmt.Errorf("release image %s is not Module Manager", img.Name)
 	}
+	c.Progress.Stepf("image", "Release {tag}: image {file}", "tag", rel.Tag, "file", img.Name)
 	want, err := c.checksumFor(ctx, rel, img)
 	if err != nil {
 		return "", err
@@ -120,6 +122,7 @@ func (c *Catalog) SelfUpdate(ctx context.Context, installed string) (string, err
 	if err := c.checkCollisions(ctx, name, newRaw); err != nil {
 		return "", err
 	}
+	c.Progress.Stepf("keep", "Keeping a copy of the installed image for the way back")
 	if err := copyFile(c.installedFile(name), filepath.Join(dir, "previous", "modmanager.raw")); err != nil {
 		return "", fmt.Errorf("no copy of the installed image for a rollback: %w", err)
 	}
@@ -128,7 +131,8 @@ func (c *Catalog) SelfUpdate(ctx context.Context, installed string) (string, err
 		return "", err
 	}
 	_ = os.Remove(filepath.Join(dir, "log"))
-	if out, err := c.Run(ctx, "systemd-run", "--unit=modmanager-self-update", "--collect", "--no-block", "/bin/sh", script); err != nil {
+	c.Progress.Stepf("handover", "Handing the swap to a separate unit: Module Manager is away for a few seconds")
+	if out, err := c.change(ctx, "systemd-run", "--unit=modmanager-self-update", "--collect", "--no-block", "/bin/sh", script); err != nil {
 		return "", fmt.Errorf("systemd-run: %v %s", err, strings.TrimSpace(string(out)))
 	}
 	return rel.Tag, nil

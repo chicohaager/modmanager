@@ -354,6 +354,8 @@ async function catalogAction(path, body, what) {
   busy = true;
   renderCatalog();
   setStatus(`${what}…`);
+  const logged = path === 'install' || path === 'uninstall';
+  if (logged) termBegin(what);
   try {
     const data = await api(`${API_BASE}/catalog/${path}`, { method: 'POST', body });
     catalog = { entries: data.entries || [], repos: data.repos || [] };
@@ -364,10 +366,135 @@ async function catalogAction(path, body, what) {
     setStatus(`${what}: ${describe(err)}`, 'err');
     return false;
   } finally {
+    if (logged) await termEnd();
     busy = false;
     armed = null;
     renderCatalog();
   }
+}
+
+// ---------- terminal ----------
+// Installs and updates took 5 to 11 s on .184 with nothing to see but "Installing…". The
+// backend logs every step (GET /modmanager/progress: release, download, checksum, file
+// check, zpkg and its output); this panel shows the log like the terminal tile of the server
+// dashboard and asks for it twice a second while an action runs.
+
+const term = { job: null, minID: 1, local: [], timer: null, pending: false, label: '' };
+
+function termTarget(j) {
+  if (j.action === 'self-update') return t('term.self', { v: selfTarget || '' });
+  const e = catalog.entries.find((x) => x.id === j.target || x.name === j.target);
+  const title = e ? (e.title || e.name) : String(j.target || '').replace(/^gh:/, '');
+  return t(j.action === 'uninstall' ? 'term.uninstall' : 'term.install', { title });
+}
+
+function termBar(a) {
+  const done = Number(a.done) || 0;
+  const total = Number(a.total) || 0;
+  if (total <= 0) return fmtBytes(done);
+  const pct = Math.min(100, Math.floor((done * 100) / total));
+  const n = Math.round(pct / 5);
+  return `[${'#'.repeat(n)}${'-'.repeat(20 - n)}] ${String(pct).padStart(3)} %  ${fmtBytes(done)} / ${fmtBytes(total)}`;
+}
+
+function termText(l) {
+  if (l.kind === 'bar') return termBar(l.args || {});
+  if (l.key && TEXTS.en[`pg.${l.key}`]) return t(`pg.${l.key}`, l.args || {});
+  return l.text || '';
+}
+
+const TERM_MARK = { cmd: '$ ', step: '› ', ok: '✓ ', err: '✗ ', bar: '  ', out: '  ' };
+
+function termLines() {
+  const j = term.job;
+  return j && j.id >= term.minID ? [...(j.lines || []), ...term.local] : term.local;
+}
+
+function renderTerm() {
+  const j = term.job && term.job.id >= term.minID ? term.job : null;
+  const out = $('#term-out');
+  const atEnd = out.scrollHeight - out.scrollTop - out.clientHeight < 24;
+  $('#term').hidden = false;
+  const t0 = j ? new Date(j.started).getTime() : Date.now();
+  const rows = termLines().map((l) => {
+    const sec = Math.max(0, (new Date(l.at).getTime() - t0) / 1000);
+    return `<span class="t">${esc(`+${sec.toFixed(1)}s`.padStart(7))}</span> <span class="k-${esc(l.kind)}">${esc(TERM_MARK[l.kind] || '  ')}${esc(termText(l))}</span>`;
+  });
+  if (j && j.dropped) rows.unshift(`<span class="t">${esc(t('term.dropped', { n: j.dropped }))}</span>`);
+  out.innerHTML = rows.join('\n');
+  if (atEnd) out.scrollTop = out.scrollHeight;
+  const running = !j || j.running || term.pending;
+  const failed = term.local.some((l) => l.kind === 'err') || (j && !j.running && !j.ok);
+  $('#term-dot').className = `term-dot ${running && !failed ? 'run' : failed ? 'err' : 'ok'}`;
+  $('#term-title').textContent = term.label || (j ? termTarget(j) : '');
+  const secs = j ? Math.round(((j.running || !j.ended ? Date.now() : new Date(j.ended).getTime()) - t0) / 1000) : 0;
+  $('#term-state').textContent = failed ? t('term.failed') : running ? t('term.running', { s: secs }) : t('term.ok', { s: secs });
+}
+
+function termSay(kind, key, args) {
+  term.local.push({ kind, key, args, at: new Date().toISOString() });
+  renderTerm();
+}
+
+async function pollProgress() {
+  try {
+    term.job = await api(`${API_BASE}/progress`);
+  } catch {
+    return;
+  }
+  const j = term.job;
+  // The action has ended on the host; the answer waits for the catalog to be read again.
+  if (term.pending && j.id >= term.minID && !j.running && !term.local.length && j.ok) termSay('step', 'reload');
+  else renderTerm();
+}
+
+// termBegin shows the panel for the action the page is about to start: a log with a lower
+// id is the previous action's and is not shown.
+function termBegin(label) {
+  term.label = label;
+  term.minID = (term.job ? term.job.id : 0) + 1;
+  term.local = [];
+  term.pending = true;
+  renderTerm();
+  clearInterval(term.timer);
+  term.timer = setInterval(pollProgress, 500);
+}
+
+async function termEnd() {
+  clearInterval(term.timer);
+  term.timer = null;
+  term.pending = false;
+  await pollProgress();
+  term.local = term.local.filter((l) => l.key !== 'reload');
+  renderTerm();
+}
+
+// An action that still runs when the page opens (reload, second tab): show it and wait for it.
+async function resumeProgress() {
+  try {
+    term.job = await api(`${API_BASE}/progress`);
+  } catch {
+    return;
+  }
+  if (!term.job.running) return;
+  term.minID = term.job.id;
+  term.label = '';
+  busy = true;
+  renderCatalog();
+  renderTerm();
+  term.timer = setInterval(async () => {
+    await pollProgress();
+    if (term.job && !term.job.running) {
+      clearInterval(term.timer);
+      term.timer = null;
+      busy = false;
+      refreshAll();
+    }
+  }, 500);
+}
+
+function termPlain() {
+  return termLines().map((l) => `${TERM_MARK[l.kind] || '  '}${termText(l)}`).join('\n');
 }
 
 // ---------- self-update ----------
@@ -397,26 +524,43 @@ async function selfUpdate() {
   selfArmed = false;
   b.disabled = true;
   setStatus(t('self.checking', { v: selfTarget }));
+  termBegin(t('term.self', { v: selfTarget }));
   try {
     const r = await api(`${API_BASE}/self/update`, { method: 'POST', body: {} });
+    await termEnd();
+    term.pending = true; // the swap runs in its own unit; done when /health answers
     setStatus(t('self.updating', { v: r.to }));
+    termSay('step', 'selfWait', { v: r.to });
     const want = r.to.replace(/^v/, '');
     let away = false;
     const until = Date.now() + 180000;
     while (Date.now() < until) {
       await new Promise((ok) => setTimeout(ok, 3000));
       let h = null;
-      try { h = await (await fetch(`${API_BASE}/health`, { cache: 'no-store' })).json(); } catch { away = true; continue; }
-      if (h && h.version === want) { location.reload(); return; }
+      try { h = await (await fetch(`${API_BASE}/health`, { cache: 'no-store' })).json(); } catch {
+        if (!away) termSay('out', 'selfAway');
+        away = true;
+        continue;
+      }
+      if (h && h.version === want) {
+        termSay('ok', 'selfBack', { v: r.to });
+        location.reload();
+        return;
+      }
       if (h && away) {
         setStatus(t('self.failed', { v: r.to, old: h.version }), 'err');
+        termSay('err', 'selfFailed', { v: r.to, old: h.version });
         return;
       }
     }
     setStatus(t('self.timeout'), 'err');
+    termSay('err', 'selfTimeout');
   } catch (e) {
+    await termEnd();
     setStatus(describe(e), 'err');
   } finally {
+    term.pending = false;
+    renderTerm();
     b.disabled = false;
   }
 }
@@ -463,6 +607,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#purge-modal').hidden) closePurge(); });
   $('#refresh-btn').addEventListener('click', refreshAll);
+  $('#term-close').addEventListener('click', () => { $('#term').hidden = true; });
+  $('#term-copy').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(termPlain()); setStatus(t('term.copied'), 'ok'); } catch { setStatus(t('copy.fail'), 'err'); }
+  });
   $('#self-update-btn').addEventListener('click', selfUpdate);
   loadSelf().catch(() => {}); // no answer about updates is not an error of this page
   $('#repo-form').addEventListener('submit', async (e) => {
@@ -495,5 +643,5 @@ document.addEventListener('DOMContentLoaded', async () => {
       catalogAction('repos/remove', { repo: b.dataset.repo }, t('what.removing', { repo: b.dataset.repo }));
     }
   });
-  refreshAll();
+  refreshAll().then(resumeProgress);
 });

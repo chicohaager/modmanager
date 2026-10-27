@@ -274,3 +274,26 @@ tr:last-child td { border-bottom: none; }
   .grid { grid-template-columns: 1fr; }
   .header-tools { margin-left: 0; }
 }
+
+/* Terminal panel: the log of an install, update or uninstall, styled like the terminal
+ * tile of the server dashboard (same ground, text and line colours). Dark in both themes. */
+.term { margin-top: 12px; border-radius: 10px; overflow: hidden; background: #0d1117; border: 1px solid #1f2630; box-shadow: var(--card-shadow); }
+.term-head { display: flex; align-items: center; gap: 10px; padding: 7px 12px; background: #161b22; border-bottom: 1px solid #1f2630; color: #d7dee8; font-size: 12.5px; }
+.term-dot { width: 9px; height: 9px; border-radius: 50%; background: #6b7280; flex: none; }
+.term-dot.run { background: #f2b155; animation: term-pulse 1s ease-in-out infinite; }
+.term-dot.ok { background: #7ee2a8; }
+.term-dot.err { background: #ff8a80; }
+@keyframes term-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .term-dot.run { animation: none; } }
+.term-title { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.term-state { color: #8b949e; margin-right: auto; white-space: nowrap; }
+.term-btn { background: transparent; color: #d7dee8; border: 1px solid #30363d; border-radius: 6px; padding: 2px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+.term-btn:hover { background: #21262d; }
+.term-out { margin: 0; padding: 12px 14px; max-height: 42vh; min-height: 120px; overflow: auto; color: #d7dee8; font: 12.5px/1.55 ui-monospace, "JetBrains Mono", Menlo, monospace; white-space: pre-wrap; word-break: break-all; }
+.term-out .t { color: #6e7681; }
+.term-out .k-cmd { color: #8ea6ff; font-weight: 600; }
+.term-out .k-step { color: #d7dee8; }
+.term-out .k-out { color: #9aa4b2; }
+.term-out .k-bar { color: #f2b155; }
+.term-out .k-ok { color: #7ee2a8; }
+.term-out .k-err { color: #ff8a80; }
