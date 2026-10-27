@@ -44,6 +44,18 @@ While an install, update or removal runs (since 0.3.3), a terminal panel under t
 
 For the Lintux modules the catalog shows the **installed version**, read where the module reports it (the health route of Cron, Sync & Backup, ZFW, Admin Tools, WireGuard, Nebula, restic Backup, Pangolin and Prometheus Exporter, `SYSEXT_VERSION_ID` for Tailscale) and compared semver-style with the latest release — a development build counts as older than its release, as in the lintux installer. Without a health route the catalog reads `SYSEXT_VERSION_ID` from the module's extension-release — for any module, also repositories you add. The build scripts of Cron, Sync & Backup, Web FTP Client and mergerfs + SnapRAID write it from their next build on; images built before have none, and then the installed image is compared byte for byte with the release image ("Differs from vX").
 
+## Security model
+
+A module is a systemd system extension: it runs **as root on the host, with no isolation** — it can read and change everything on the box. Module Manager does not change that; it makes the trust decision visible and checks what it can:
+
+- **Who maintains what:** the Lintux modules in the catalog are built and maintained by me, source on GitHub. Repositories you add are marked *third-party*, and the UI says that the checksum does not vouch for their author.
+- **Integrity:** an image is installed only when its release ships a sha256 checksum and the download matches it — for modules and for Module Manager's own update. This proves the file arrived intact, not who built it: the checksum comes from the same release.
+- **No silent overwrite:** an image is refused when one of its files already exists on the host, so a module cannot replace a file of ZimaOS.
+- **Nothing on its own:** updates are only shown (catalog, dashboard card); installing is always a click. A failed update puts the previous version back.
+- **State:** downloads and backups live in `/DATA/.modmanager`, mode 0700, root only; the service refuses to start when that directory is a symlink, foreign-owned or in a directory others can write to.
+
+Not there yet: signed releases (a key that ties an image to its author) and any sandboxing of modules. Until then: install modules only from authors you trust.
+
 ## UI
 
 Light theme in the ZFW Firewall style, dark theme following the ZimaOS dark desktop (same wallpaper, translucent cards). Theme: auto (follows the system), light or dark.
