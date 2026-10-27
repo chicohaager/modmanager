@@ -215,15 +215,17 @@ async function act(action, id, confirm) {
   const name = a ? a.title : id;
   busy = true;
   renderApps();
-  setStatus(t(`act.${action}`, { name }));
+  setStatus(''); // the terminal panel shows what runs
+  termBegin(t(`term.${action}`, { title: name }));
   try {
     const data = await api(`${API_BASE}/apps/${action}`, { method: 'POST', body: { id, confirm } });
     apps = data.apps || [];
-    setStatus(t(`done.${action}`, { name }), 'ok');
+    setStatus(t(`done.${action}`, { name }), 'ok'); // says to reload the dashboard
   } catch (err) {
     setStatus(`${name}: ${describe(err)}`, 'err');
     try { await loadApps(); } catch { /* keep the message above */ }
   } finally {
+    await termEnd();
     busy = false;
     renderApps();
   }
@@ -353,13 +355,15 @@ async function loadCatalog() {
 async function catalogAction(path, body, what) {
   busy = true;
   renderCatalog();
-  setStatus(`${what}…`);
+  // With the terminal panel the status line stays empty: the panel names the action
+  // and its result; the status line keeps only an error.
   const logged = path === 'install' || path === 'uninstall';
+  setStatus(logged ? '' : `${what}…`);
   if (logged) termBegin(what);
   try {
     const data = await api(`${API_BASE}/catalog/${path}`, { method: 'POST', body });
     catalog = { entries: data.entries || [], repos: data.repos || [] };
-    setStatus(t('cat.done', { what }), 'ok');
+    if (!logged) setStatus(t('cat.done', { what }), 'ok');
     loadModules().catch(() => {});
     return true;
   } catch (err) {
@@ -383,6 +387,10 @@ const term = { job: null, minID: 1, local: [], timer: null, pending: false, labe
 
 function termTarget(j) {
   if (j.action === 'self-update') return t('term.self', { v: selfTarget || '' });
+  if (['hide', 'restore', 'purge'].includes(j.action)) {
+    const a = apps.find((x) => x.id === j.target);
+    return t(`term.${j.action}`, { title: a ? a.title : j.target });
+  }
   const e = catalog.entries.find((x) => x.id === j.target || x.name === j.target);
   const title = e ? (e.title || e.name) : String(j.target || '').replace(/^gh:/, '');
   return t(j.action === 'uninstall' ? 'term.uninstall' : 'term.install', { title });
@@ -523,13 +531,12 @@ async function selfUpdate() {
   }
   selfArmed = false;
   b.disabled = true;
-  setStatus(t('self.checking', { v: selfTarget }));
+  setStatus('');
   termBegin(t('term.self', { v: selfTarget }));
   try {
     const r = await api(`${API_BASE}/self/update`, { method: 'POST', body: {} });
     await termEnd();
     term.pending = true; // the swap runs in its own unit; done when /health answers
-    setStatus(t('self.updating', { v: r.to }));
     termSay('step', 'selfWait', { v: r.to });
     const want = r.to.replace(/^v/, '');
     let away = false;

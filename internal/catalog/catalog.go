@@ -29,7 +29,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -45,9 +44,6 @@ import (
 
 // Runner runs a command and returns its combined output.
 type Runner func(ctx context.Context, name string, args ...string) ([]byte, error)
-
-// StreamRunner runs a command and writes its output to out while it runs.
-type StreamRunner func(ctx context.Context, out io.Writer, name string, args ...string) error
 
 // Preset is a known repository.
 type Preset struct {
@@ -126,8 +122,8 @@ type Entry struct {
 // Catalog lists and installs modules.
 type Catalog struct {
 	Run       Runner
-	Stream    StreamRunner  // nil: commands that change the host go through Run, output after the end
-	Progress  *progress.Log // nil: no progress report
+	Stream    progress.Stream // nil: commands that change the host go through Run, output after the end
+	Progress  *progress.Log   // nil: no progress report
 	HTTP      *http.Client
 	GitHubAPI string // https://api.github.com
 	GitHubWeb string // https://github.com — release pages, used when the API is rate limited
@@ -866,30 +862,9 @@ func (c *Catalog) installRepo(ctx context.Context, repo string) error {
 	return err
 }
 
-// change runs a command that changes the host and reports it with its output:
-// live through Stream when there is one, else through Run after it ended.
+// change runs a command that changes the host and reports it with its output.
 func (c *Catalog) change(ctx context.Context, name string, args ...string) ([]byte, error) {
-	c.Progress.Command(name, args...)
-	if c.Stream == nil {
-		out, err := c.Run(ctx, name, args...)
-		c.Progress.Output(out)
-		return out, err
-	}
-	w := c.Progress.Writer()
-	err := c.Stream(ctx, w, name, args...)
-	w.Flush()
-	out := w.Tail()
-	if err != nil {
-		return out, fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-	}
-	return out, nil
-}
-
-// ExecStream runs a command on the host, stdout and stderr into out.
-func ExecStream(ctx context.Context, out io.Writer, name string, args ...string) error {
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Stdout, cmd.Stderr = out, out
-	return cmd.Run()
+	return c.Progress.Exec(ctx, c.Stream, c.Run, name, args...)
 }
 
 // checkCollisions refuses an image that carries a file the host already has.

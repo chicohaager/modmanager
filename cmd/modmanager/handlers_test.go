@@ -20,6 +20,7 @@ type fakeSvc struct {
 	calls  []string
 	err    error
 	ctxErr error
+	log    *progress.Log // the progress log the action's context carried
 }
 
 func (f *fakeSvc) List(context.Context) ([]sysapps.App, error) {
@@ -28,6 +29,7 @@ func (f *fakeSvc) List(context.Context) ([]sysapps.App, error) {
 func (f *fakeSvc) Hide(ctx context.Context, id string) error {
 	f.calls = append(f.calls, "hide "+id)
 	f.ctxErr = ctx.Err()
+	f.log = progress.FromContext(ctx)
 	return f.err
 }
 func (f *fakeSvc) Restore(_ context.Context, id string) error {
@@ -352,5 +354,27 @@ func TestProgressShowsTheLastCatalogAction(t *testing.T) {
 	do(t, mux, http.MethodPost, "/modmanager/self/update", `{}`, nil)
 	if s := read(); s.ID != 3 || s.Action != "self-update" || !s.OK {
 		t.Errorf("after self-update: %+v", s)
+	}
+}
+
+// Hiding a built-in app runs as a job too; sysapps gets the log through the context.
+func TestAppActionsRunAsAJob(t *testing.T) {
+	old := jobs
+	jobs = &progress.Log{}
+	t.Cleanup(func() { jobs = old })
+	svc := &fakeSvc{}
+	mux := newMux(svc, &fakeCat{}, requireToken)
+	do(t, mux, http.MethodPost, "/modmanager/apps/hide", `{"id":"module:icewhale_photos"}`, nil)
+	s := jobs.Snapshot()
+	if s.ID != 1 || s.Action != "hide" || s.Target != "module:icewhale_photos" || s.Running || !s.OK {
+		t.Fatalf("job %+v", s)
+	}
+	if svc.log != jobs {
+		t.Fatal("Hide's context did not carry the job's log")
+	}
+	svc.err = sysapps.ErrBlocked
+	do(t, mux, http.MethodPost, "/modmanager/apps/hide", `{"id":"module:icewhale_photos"}`, nil)
+	if s := jobs.Snapshot(); s.ID != 2 || s.OK || len(s.Lines) != 1 || s.Lines[0].Kind != progress.Err {
+		t.Fatalf("failed hide %+v", s)
 	}
 }

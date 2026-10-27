@@ -32,7 +32,7 @@ for (const l of LANGS.slice(1)) {
 
 const app = read(`${WEB}/app.js`);
 for (const m of app.matchAll(/\bth?\('([\w.]+)'/g)) need(m[1], 'app.js');
-for (const prefix of ['act', 'done']) for (const a of ['hide', 'restore', 'purge']) need(`${prefix}.${a}`, `app.js t(\`${prefix}.\${action}\`)`);
+for (const prefix of ['done', 'term']) for (const a of ['hide', 'restore', 'purge']) need(`${prefix}.${a}`, `app.js t(\`${prefix}.\${action}\`)`);
 for (const k of ['sysext', 'base', 'system']) need(`kind.${k}`, 'app.js kind');
 
 const html = read(`${WEB}/index.html`);
@@ -47,7 +47,7 @@ for (const m of fn.matchAll(/return "(\w+)"/g)) goCodes.add(m[1]);
 for (const m of cat.matchAll(/e\.ErrorCode = [^\n]*"(\w+)"\n/g)) goCodes.add(m[1]);
 for (const c of goCodes) need(`code.${c}`, 'Go error code');
 // progress lines (terminal panel): every key the backend reports and every key the page adds
-for (const f of ['internal/catalog/catalog.go', 'internal/catalog/self.go']) for (const m of read(f).matchAll(/\.(?:Stepf|Okf|Errf)\("(\w+)"/g)) need(`pg.${m[1]}`, `${f} progress key`);
+for (const f of ['internal/catalog/catalog.go', 'internal/catalog/self.go', 'internal/sysapps/sysapps.go']) for (const m of read(f).matchAll(/\.(?:Stepf|Okf|Errf)\("(\w+)"/g)) need(`pg.${m[1]}`, `${f} progress key`);
 for (const m of read('internal/progress/progress.go').matchAll(/Key: "(\w+)"/g)) need(`pg.${m[1]}`, 'progress.go key');
 for (const m of app.matchAll(/termSay\('\w+', '(\w+)'/g)) need(`pg.${m[1]}`, 'app.js termSay');
 const sys = read('internal/sysapps/sysapps.go');

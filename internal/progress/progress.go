@@ -9,7 +9,10 @@ package progress
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"io"
+	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -164,9 +167,14 @@ func (l *Log) Download(done, total int64) {
 	l.add(Line{Kind: Bar, Key: "download", Args: args, Text: text}, true)
 }
 
+// add drops a line that comes while no job runs: Reconcile at start re-merges the
+// system extensions through the same code as Hide, outside any action.
 func (l *Log) add(ln Line, replaceBar bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if !l.job.Running {
+		return
+	}
 	ln.At = l.clock()
 	if n := len(l.job.Lines); replaceBar && n > 0 && l.job.Lines[n-1].Kind == Bar {
 		l.job.Lines[n-1] = ln
@@ -244,3 +252,47 @@ func clean(s string) string {
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+type ctxKey struct{}
+
+// NewContext carries a log to code that has no field for it (sysapps): only a request
+// that started a job reports, never Reconcile at start.
+func NewContext(ctx context.Context, l *Log) context.Context {
+	return context.WithValue(ctx, ctxKey{}, l)
+}
+
+// FromContext returns the log NewContext put there, or nil (which ignores everything).
+func FromContext(ctx context.Context) *Log {
+	l, _ := ctx.Value(ctxKey{}).(*Log)
+	return l
+}
+
+// Stream runs a command and writes its output to out while it runs.
+type Stream func(ctx context.Context, out io.Writer, name string, args ...string) error
+
+// ExecStream runs a command on the host, stdout and stderr into out.
+func ExecStream(ctx context.Context, out io.Writer, name string, args ...string) error {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdout, cmd.Stderr = out, out
+	return cmd.Run()
+}
+
+// Exec runs a command that changes the host and reports it with its output: live
+// through stream when there is one, else through run after it ended. The error
+// names the command and the end of its output, as sysapps.ExecRunner does.
+func (l *Log) Exec(ctx context.Context, stream Stream, run func(context.Context, string, ...string) ([]byte, error), name string, args ...string) ([]byte, error) {
+	l.Command(name, args...)
+	if stream == nil {
+		out, err := run(ctx, name, args...)
+		l.Output(out)
+		return out, err
+	}
+	w := l.Writer()
+	err := stream(ctx, w, name, args...)
+	w.Flush()
+	out := w.Tail()
+	if err != nil {
+		return out, fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return out, nil
+}
