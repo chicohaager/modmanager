@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -36,6 +37,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chicohaager/lintux-modkit/stale"
 	"github.com/chicohaager/modmanager/internal/state"
 )
 
@@ -100,11 +102,20 @@ type Entry struct {
 	State string `json:"state,omitempty"`
 	// InstalledVersion is read from the running module, empty when unknown.
 	InstalledVersion string `json:"installed_version,omitempty"`
-	Protected        bool   `json:"protected,omitempty"`
-	Error            string `json:"error,omitempty"`
-	Note             string `json:"note,omitempty"`       // e.g. served from cache because of GitHub's rate limit
-	ErrorCode        string `json:"error_code,omitempty"` // rate_limit | no_release | unreachable | no_image | no_checksum | failed
-	StaleAt          string `json:"stale_at,omitempty"`   // RFC 3339: the release info is this old (rate limit); the UI words it
+	// RestartNeeded: the module's health route reports "binary":"replaced" — its
+	// file is newer than the running process (after `zpkg install --force`, which
+	// does not restart the service; lintux-modkit webmod, measured on 1.8.0). A
+	// reinstall here goes through zpkg remove + install, which restarts it.
+	RestartNeeded bool `json:"restart_needed,omitempty"`
+	// StaleUnits: the module's services whose process runs other bytes than the
+	// program file its ExecStart names — measured here, so it works for every
+	// module, also ones built before their health route reported it.
+	StaleUnits []string `json:"stale_units,omitempty"`
+	Protected  bool     `json:"protected,omitempty"`
+	Error      string   `json:"error,omitempty"`
+	Note       string   `json:"note,omitempty"`       // e.g. served from cache because of GitHub's rate limit
+	ErrorCode  string   `json:"error_code,omitempty"` // rate_limit | no_release | unreachable | no_image | no_checksum | failed
+	StaleAt    string   `json:"stale_at,omitempty"`   // RFC 3339: the release info is this old (rate limit); the UI words it
 }
 
 // Catalog lists and installs modules.
@@ -701,8 +712,8 @@ func (c *Catalog) repoEntry(ctx context.Context, repo, source string, p Preset) 
 		}
 		// An own installer without an image (zfw ships a tarball): the
 		// health route alone tells whether and which version runs.
-		if v := c.installedVersion(ctx, "", p); v != "" {
-			e.Installed, e.InstalledVersion = true, v
+		if v, replaced := c.installedVersion(ctx, "", p); v != "" {
+			e.Installed, e.InstalledVersion, e.RestartNeeded = true, v, replaced
 			e.State = stateFor(v, rel.Tag)
 		}
 		return e
@@ -715,8 +726,11 @@ func (c *Catalog) repoEntry(ctx context.Context, repo, source string, p Preset) 
 		e.Error, e.ErrorCode = "the release ships no checksum for "+img.Name+"; it cannot be installed from here", "no_checksum"
 	}
 	if e.Installed {
-		if v := c.installedVersion(ctx, name, p); v != "" {
-			e.InstalledVersion = v
+		if units := c.staleUnits(ctx, name); len(units) > 0 {
+			e.StaleUnits, e.RestartNeeded = units, true
+		}
+		if v, replaced := c.installedVersion(ctx, name, p); v != "" {
+			e.InstalledVersion, e.RestartNeeded = v, e.RestartNeeded || replaced
 			e.State = stateFor(v, rel.Tag)
 			return e
 		}
@@ -953,15 +967,52 @@ func (c *Catalog) Uninstall(ctx context.Context, name string) error {
 	return err
 }
 
+// staleUnits lists the services of an installed module that run an older
+// program than the merged image holds: its unit files are in the image
+// (/usr/lib/systemd/system/*.service; a template counts with its running
+// instances), stale.Find compares /proc/<pid>/exe with the ExecStart file.
+func (c *Catalog) staleUnits(ctx context.Context, name string) []string {
+	files, err := c.imageFiles(ctx, c.installedFile(name))
+	if err != nil {
+		return nil
+	}
+	sysctl := func(ctx context.Context, args ...string) ([]byte, error) { return c.Run(ctx, "systemctl", args...) }
+	var units []string
+	for _, f := range files {
+		dir, base := path.Split(f)
+		if dir != "/usr/lib/systemd/system/" || !strings.HasSuffix(base, ".service") {
+			continue
+		}
+		if tmpl, ok := strings.CutSuffix(base, "@.service"); ok {
+			out, err := sysctl(ctx, "list-units", "--plain", "--no-legend", "--state=running", tmpl+"@*.service")
+			if err != nil {
+				continue
+			}
+			for _, l := range strings.Split(string(out), "\n") {
+				if u := strings.Fields(l); len(u) > 0 && strings.HasPrefix(u[0], tmpl+"@") {
+					units = append(units, u[0])
+				}
+			}
+			continue
+		}
+		units = append(units, base)
+	}
+	if len(units) == 0 {
+		return nil
+	}
+	return stale.Find(ctx, stale.Options{Units: units, Proc: filepath.Join(c.Root, "proc"), Systemctl: sysctl})
+}
+
 // installedVersion asks the running module for its version (health route)
 // and falls back to its merged extension-release — SYSEXT_VERSION_ID unless
-// the preset names another key; "" when neither answers.
-func (c *Catalog) installedVersion(ctx context.Context, name string, p Preset) string {
-	if v := c.healthVersion(ctx, p); v != "" {
-		return v
+// the preset names another key; "" when neither answers. replaced: the health
+// route says the running process is older than its file.
+func (c *Catalog) installedVersion(ctx context.Context, name string, p Preset) (string, bool) {
+	if v, replaced := c.healthVersion(ctx, p); v != "" {
+		return v, replaced
 	}
 	if name == "" {
-		return ""
+		return "", false
 	}
 	key := p.ReleaseKey
 	if key == "" {
@@ -969,41 +1020,43 @@ func (c *Catalog) installedVersion(ctx context.Context, name string, p Preset) s
 	}
 	b, err := os.ReadFile(filepath.Join(c.UsrLib, "extension-release.d", "extension-release."+name))
 	if err != nil {
-		return ""
+		return "", false
 	}
 	for _, l := range strings.Split(string(b), "\n") {
 		if v, ok := strings.CutPrefix(l, key+"="); ok {
-			return cleanVersion(strings.Trim(v, `"'`))
+			return cleanVersion(strings.Trim(v, `"'`)), false
 		}
 	}
-	return ""
+	return "", false
 }
 
-func (c *Catalog) healthVersion(ctx context.Context, p Preset) string {
+func (c *Catalog) healthVersion(ctx context.Context, p Preset) (string, bool) {
 	if p.HealthPath == "" {
-		return ""
+		return "", false
 	}
 	hctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(hctx, http.MethodGet, c.Gateway+p.HealthPath, nil)
 	if err != nil {
-		return ""
+		return "", false
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return ""
+		return "", false
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return ""
+		return "", false
 	}
 	var h struct {
 		Version string `json:"version"`
+		Binary  string `json:"binary"` // lintux-modkit webmod: current, replaced, unknown
 	}
 	if json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&h) != nil {
-		return ""
+		return "", false
 	}
-	return cleanVersion(h.Version)
+	v := cleanVersion(h.Version)
+	return v, v != "" && h.Binary == "replaced"
 }
 
 // stateFor compares an installed version with the release tag.
