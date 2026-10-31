@@ -122,7 +122,7 @@ func TestSelfUpdateScriptRollsBack(t *testing.T) {
 			if restarted := strings.Contains(string(calls), "systemctl restart modmanager.service"); restarted != (tc.result != "result rollback-failed") {
 				t.Fatalf("calls:\n%s\nrestart of modmanager.service: %v after %q", calls, restarted, tc.result)
 			}
-			// zpkg copied the new image to /var/lib/extensions (measured .184): after success the staged copy goes,
+			// zpkg copied the new image to /var/lib/extensions (measured on the second test NAS): after success the staged copy goes,
 			// the previous one stays as the way back; after a rollback both stay for a look.
 			_, errNew := os.Stat(filepath.Join(dir, "new", "modmanager.raw"))
 			if gone := os.IsNotExist(errNew); gone != (tc.result == "result ok") {

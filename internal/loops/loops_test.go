@@ -17,7 +17,7 @@ import (
 )
 
 // sysTree writes /sys/block/loopN/loop/backing_file like the kernel does (measured on
-// .184: "/zfw.raw", "/web-ftp-client.raw (deleted)", "/.zpkg-backups/restic.raw.bak (deleted)").
+// second test NAS: "/zfw.raw", "/web-ftp-client.raw (deleted)", "/.zpkg-backups/restic.raw.bak (deleted)").
 func sysTree(t *testing.T, files ...string) string {
 	t.Helper()
 	sys := t.TempDir()
@@ -187,7 +187,7 @@ func procTree(t *testing.T, procs map[string][3]string) string {
 	return proc
 }
 
-// The stacking as measured on .184 (systemd-logind, 2026-10-27): the old /usr of the
+// The stacking as measured on the second test NAS (systemd-logind, 2026-10-27): the old /usr of the
 // service's start sits on the current one and comes first in mountinfo.
 func TestStaleUsrFindsServicesWithTheOldUsrOnTop(t *testing.T) {
 	host := "24 1 0:317 / /usr ro,nodev,relatime shared:9 - overlay sysext ro,lowerdir=x\n"

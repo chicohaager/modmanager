@@ -41,7 +41,7 @@ func TestEnsureMakesARootOnlyDirectory(t *testing.T) {
 	}
 }
 
-// /DATA/AppData is 0777 without the sticky bit on ZimaOS 1.8 (measured on .184,
+// /DATA/AppData is 0777 without the sticky bit on ZimaOS 1.8 (measured on the second test NAS,
 // 2026-10-26): anybody who can write there can swap a directory for their own.
 func TestEnsureRefusesAParentOthersCanWrite(t *testing.T) {
 	for _, m := range []os.FileMode{0o777, 0o775, 0o757, 0o1777} {

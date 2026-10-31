@@ -759,7 +759,7 @@ func TestHealthWinsOverExtensionRelease(t *testing.T) {
 
 // The sysext modules with a tile (lintux-modkit webmod) answer {"version": …}
 // without login at /<name>/health, <name> being the module name from the
-// repository zimaos-<name>-sysext (measured on .184, 2026-10-23).
+// repository zimaos-<name>-sysext (measured on the second test NAS, 2026-10-23).
 func TestSysextModulePresetsReadTheirHealthRoute(t *testing.T) {
 	want := map[string]bool{"admintools": false, "wireguard": false, "nebula": false, "restic": false, "pangolin": false, "node-exporter": false}
 	for _, p := range Presets {

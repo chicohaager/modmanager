@@ -7,7 +7,7 @@
 // all its images — as long as a process started under it still runs or a service
 // namespace still has it mounted (measured on ZimaOS 1.8.0, systemd 258.7, kernel
 // 6.18.9, KB §79.15). Nothing frees them but restarting what holds them, in practice
-// a reboot of ZimaOS. Measured on .184: 634 loop devices after a day of tests, 57
+// a reboot of ZimaOS. Measured on the second test NAS: 634 loop devices after a day of tests, 57
 // right after a reboot. Module Manager does not restart anything for it; it says so.
 package loops
 

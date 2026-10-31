@@ -390,7 +390,7 @@ async function catalogAction(path, body, what) {
 }
 
 // ---------- terminal ----------
-// Installs and updates took 5 to 11 s on .184 with nothing to see but "Installing…". The
+// Installs and updates took 5 to 11 s on the second test NAS with nothing to see but "Installing…". The
 // backend logs every step (GET /modmanager/progress: release, download, checksum, file
 // check, zpkg and its output); this panel shows the log like the terminal tile of the server
 // dashboard and asks for it twice a second while an action runs.

@@ -1,6 +1,6 @@
 // Package progress keeps the log of the running (or last) catalog action, which the UI
 // shows in a terminal panel while it waits. Before it the page said only "Installing…":
-// installs on .184 took 5 to 11 s plus up to 3 s for the catalog reload (journal,
+// installs on the second test NAS took 5 to 11 s plus up to 3 s for the catalog reload (journal,
 // 26–27 Oct 2026), with nothing to see in between.
 //
 // A line carries a text key and its values for the UI's translation and an English
@@ -74,7 +74,7 @@ func (l *Log) clock() time.Time {
 // Start begins a new job and forgets the previous one. The id is the start time in
 // milliseconds (at least one more than the last): a page that stayed open across a
 // restart of Module Manager (self-update, update by hand) knows ids of the old process
-// and shows only newer ones — a counter from 1 would be hidden there (measured on .184,
+// and shows only newer ones — a counter from 1 would be hidden there (measured on the second test NAS,
 // 2026-10-27: the panel stayed empty after a restart).
 func (l *Log) Start(action, target string) {
 	if l == nil {

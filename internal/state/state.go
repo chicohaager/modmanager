@@ -3,7 +3,7 @@
 // repositories, the saved manifests of hidden apps and the user.db backups.
 //
 // Up to 0.3.0 it was /DATA/AppData/modmanager. /DATA/AppData is 0777 without the
-// sticky bit on ZimaOS 1.8 (measured on .184, 2026-10-26: a non-root user created a
+// sticky bit on ZimaOS 1.8 (measured on the second test NAS, 2026-10-26: a non-root user created a
 // directory there, and in /DATA not), and the share of /DATA is writable over SMB:
 // whoever can write there can rename the directory and put their own in its place —
 // an image swapped between checksum and zpkg install, a symlink root writes through.
