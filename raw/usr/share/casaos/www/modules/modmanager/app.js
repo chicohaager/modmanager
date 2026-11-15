@@ -82,6 +82,7 @@ function codeText(code, message) {
 
 function describe(err) {
   if (err instanceof ApiError && err.status === 401) return t('err.session');
+  if (err instanceof ApiError && err.status === 403 && err.code === 'auth_forbidden') return t('err.forbidden');
   if (err instanceof ApiError) return codeText(err.code, err.message);
   return err.message || String(err);
 }
