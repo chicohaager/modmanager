@@ -75,6 +75,49 @@ def selftest() -> bool:
         if (got > 0) != (want > 0):
             print(f"✗ selftest: {entry!r} gave {got} problem(s), expected {'some' if want else 'none'}")
             return False
+    return cleanup_selftest(good)
+
+
+class FakeApi:
+    """Stands in for Api in run_check: entries() answers from a list (an exception is raised)."""
+
+    def __init__(self, entries: list, remove_status: int):
+        self.answers, self.remove_status, self.removed = list(entries), remove_status, False
+
+    def entries(self) -> list[dict]:
+        a = self.answers.pop(0)
+        if isinstance(a, BaseException):
+            raise a
+        return a
+
+    def call(self, method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
+        if path.endswith("/remove"):
+            self.removed = True
+            return self.remove_status, {"error": "x"} if self.remove_status != 200 else {}
+        return 200, {}
+
+
+def cleanup_selftest(good: dict) -> bool:
+    import contextlib
+    import io
+    boom = SystemExit("✗ GET /modmanager/catalog: HTTP 500 lookup")
+    runs = [  # (entries answers, remove status, expected: int return or the exception)
+        ([[], [good], []], 200, 0),
+        ([[], [good], []], 500, 1),          # cleanup failed after a good check
+        ([[], boom, []], 200, boom),         # lookup failed, cleanup fine
+        ([[], boom, []], 500, boom),         # lookup failed AND cleanup failed: first error must survive
+    ]
+    for answers, rs, want in runs:
+        api = FakeApi(answers, rs)
+        with contextlib.redirect_stdout(io.StringIO()):
+            try:
+                got = run_check(api, "o/r", "1.2.3", keep=False)
+            except SystemExit as e:
+                got = e
+        if (got is not want if isinstance(want, BaseException) else got != want) or not api.removed:
+            print(f"✗ selftest: cleanup run (remove HTTP {rs}, lookup {'raises' if boom in answers else 'ok'}) "
+                  f"gave {got!r}, expected {want!r}; removed={api.removed}")
+            return False
     return True
 
 
@@ -125,44 +168,55 @@ def main() -> int:
     if not selftest():
         return 2
     if a.selftest:
-        print("✓ selftest: a correct entry passes, 7 wrong ones fail")
+        print("✓ selftest: a correct entry passes, 7 wrong ones fail; cleanup runs in 4 cases and never swallows the first error")
         return 0
     if not (a.url and a.user and a.password_file):
         ap.error("--url, --user and --password-file are required")
-    expect = a.expect or source_version()
-    eid = "gh:" + a.repo
-
     api = Api(a.url)
     api.login(a.user, pathlib.Path(a.password_file).read_text().strip())
+    return run_check(api, a.repo, a.expect or source_version(), a.keep)
+
+
+def run_check(api, repo: str, expect: str, keep: bool) -> int:
+    """Add the repository, check its entry, remove it again; 0 when all is right.
+
+    An exception while checking (SystemExit from Api.entries) still propagates after the
+    cleanup, also when the cleanup fails: the cleanup only records its failure, it never
+    returns from the finally block (that would swallow the first error).
+    """
+    eid = "gh:" + repo
     before = api.entries()
     was_there = any(e.get("id") == eid for e in before)
-    print(f"catalog before: {len(before)} entries, {a.repo} {'already listed' if was_there else 'not listed'}")
+    print(f"catalog before: {len(before)} entries, {repo} {'already listed' if was_there else 'not listed'}")
 
     if not was_there:
-        st, d = api.call("POST", "/modmanager/catalog/repos", {"repo": a.repo})
+        st, d = api.call("POST", "/modmanager/catalog/repos", {"repo": repo})
         if st != 200:
-            print(f"✗ add {a.repo}: HTTP {st} {d.get('error', '')}")
+            print(f"✗ add {repo}: HTTP {st} {d.get('error', '')}")
             return 1
+    restore_failed = False
     try:
         entry = next((e for e in api.entries() if e.get("id") == eid), None)
         if entry is not None:
             print("entry:", json.dumps({k: entry[k] for k in SHOWN if k in entry}, ensure_ascii=False))
         found = problems(entry, expect)
     finally:
-        if not was_there and not a.keep:
-            st, d = api.call("POST", "/modmanager/catalog/repos/remove", {"repo": a.repo})
+        if not was_there and not keep:
+            st, d = api.call("POST", "/modmanager/catalog/repos/remove", {"repo": repo})
             after = api.entries()
-            print(f"removed {a.repo}: HTTP {st}; catalog after: {len(after)} entries (before: {len(before)})")
+            print(f"removed {repo}: HTTP {st}; catalog after: {len(after)} entries (before: {len(before)})")
             if st != 200 or len(after) != len(before):
                 print("✗ catalog not back to its previous state")
-                return 1
+                restore_failed = True
+    if restore_failed:
+        return 1
 
     if found:
-        print(f"✗ {a.repo} v{expect}:")
+        print(f"✗ {repo} v{expect}:")
         for p in found:
             print("  -", p)
         return 1
-    print(f"✓ {a.repo} v{expect}: release image picked, installed version current")
+    print(f"✓ {repo} v{expect}: release image picked, installed version current")
     return 0
 
 
