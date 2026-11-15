@@ -783,6 +783,20 @@ func TestSysextModulePresetsReadTheirHealthRoute(t *testing.T) {
 	}
 }
 
+// Notepad lives in chicohaager/zima-notepad, publishes notepad-<arch>.raw with a
+// .sha256 and answers {"version": …} at /notepad/health (v0.1.2, 2026-11-15).
+func TestNotepadPresetInstallsWithZpkgAndReadsItsHealthRoute(t *testing.T) {
+	for _, p := range Presets {
+		if p.Repo == "chicohaager/zima-notepad" {
+			if p.Title != "Notepad" || p.Installer != "zpkg" || p.HealthPath != "/notepad/health" {
+				t.Fatalf("notepad preset: %+v", p)
+			}
+			return
+		}
+	}
+	t.Fatal("no preset for chicohaager/zima-notepad")
+}
+
 // A module updated with `zpkg install --force` keeps running the old process
 // (measured on 1.8.0); its webmod health route says "binary":"replaced".
 func TestReplacedBinaryAsksForARestart(t *testing.T) {

@@ -6,7 +6,7 @@
 //   - Lintux presets: the Lintux module repositories (measured 2026-10-21 which
 //     publish an image: cron, zima-backup, web-ftp-client and, since 2026-10-23,
 //     admintools, wireguard, nebula, restic and, since 2026-10-26, pangolin and
-//     node-exporter (Prometheus Exporter) install via zpkg;
+//     node-exporter (Prometheus Exporter) and, since 2026-11-15, notepad install via zpkg;
 //     tailscale, mergerfs-snapraid and zfw need their own installer and are
 //     shown with its command instead of an install button).
 //   - Repositories the user adds (owner/repo or a github.com URL): the newest
@@ -61,7 +61,8 @@ type Preset struct {
 const lintuxInstall = "curl -fsSL https://raw.githubusercontent.com/chicohaager/lintux-modkit/main/install.sh -o /tmp/lintux-install.sh && sudo bash /tmp/lintux-install.sh --install "
 
 // Presets are the Lintux module repositories with a release image (gh api, 2026-10-21;
-// admintools, wireguard, nebula and restic since 2026-10-23, pangolin and node-exporter since 2026-10-26).
+// admintools, wireguard, nebula and restic since 2026-10-23, pangolin and node-exporter since 2026-10-26,
+// notepad since 2026-11-15).
 var Presets = []Preset{
 	{Repo: "chicohaager/cron", Title: "Cron", Installer: "zpkg", HealthPath: "/cron/health"},
 	{Repo: "chicohaager/zima-backup", Title: "Sync & Backup", Installer: "zpkg", HealthPath: "/v2/zbackup/api/health"},
@@ -72,6 +73,7 @@ var Presets = []Preset{
 	{Repo: "chicohaager/zimaos-restic-sysext", Title: "restic Backup", Installer: "zpkg", HealthPath: "/restic/health"},
 	{Repo: "chicohaager/zimaos-pangolin-sysext", Title: "Pangolin", Installer: "zpkg", HealthPath: "/pangolin/health"},
 	{Repo: "chicohaager/zimaos-node-exporter-sysext", Title: "Prometheus Exporter", Installer: "zpkg", HealthPath: "/node-exporter/health"},
+	{Repo: "chicohaager/zima-notepad", Title: "Notepad", Installer: "zpkg", HealthPath: "/notepad/health"},
 	{Repo: "chicohaager/zfw", Title: "ZFW Firewall", Installer: "own", Command: lintuxInstall + "zfw", HealthPath: "/v2/zfw/api/health"},
 	{Repo: "chicohaager/zimaos-mergerfs-snapraid-sysext", Title: "mergerfs + SnapRAID", Installer: "own", Command: lintuxInstall + "mergerfs"},
 	{Repo: "chicohaager/zimaos-tailscale-sysext", Title: "Tailscale", Installer: "own", Command: lintuxInstall + "tailscale", ReleaseKey: "SYSEXT_VERSION_ID"},
