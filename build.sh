@@ -13,7 +13,8 @@ echo "modmanager v$VERSION linux/$ARCH"
 grep -q "^\*\*Version $VERSION\*\*" README.md \
   || { echo "README.md header: '$(grep -m1 -o '^\*\*Version [^*]*' README.md)', code: $VERSION" >&2; exit 1; }
 
-sh scripts/modkit-check.sh     # the lintux-modkit commit of lintux-modkit.ref, no local changes
+MODKIT="${LINTUX_MODKIT:-../lintux-modkit}"
+sh scripts/modkit-check.sh "$MODKIT"   # the lintux-modkit commit of lintux-modkit.ref, no local changes
 go vet ./...
 go test -count=1 ./...
 node --check "$WEB/app.js"
@@ -28,4 +29,4 @@ CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH" go build -trimpath -buildvcs=false -ldfl
 # Cache-bust the frontend with the version and keep the shown version in step.
 sed -i -E "s/(styles\.css|app\.js|i18n\.js)\?v=[0-9A-Za-z.-]+/\1?v=$VERSION/g; s/(id=\"app-version\">)v[0-9A-Za-z.-]+/\1v$VERSION/" "$WEB/index.html"
 
-sh ../lintux-modkit/sysext/build-sysext.sh modmanager raw "$ARCH" dist "$VERSION"
+sh "$MODKIT/sysext/build-sysext.sh" modmanager raw "$ARCH" dist "$VERSION"
