@@ -365,7 +365,7 @@ async function loadCatalog() {
   renderCatalog();
 }
 
-async function catalogAction(path, body, what) {
+async function catalogAction(path, body, what, title) {
   busy = true;
   renderCatalog();
   // With the terminal panel the status line stays empty: the panel names the action
@@ -377,6 +377,10 @@ async function catalogAction(path, body, what) {
     const data = await api(`${API_BASE}/catalog/${path}`, { method: 'POST', body });
     catalog = { entries: data.entries || [], repos: data.repos || [] };
     if (!logged) setStatus(t('cat.done', { what }), 'ok');
+    // An open ZimaOS 1.8 dashboard does not show a new module's tile until it is reloaded
+    // (measured 2026-11-17: no tile after 120 s, the tile after a reload). Install, update and
+    // restart all come through here.
+    if (path === 'install') setStatus(t('done.install', { name: title || what }), 'ok');
     loadModules().catch(() => {});
     return true;
   } catch (err) {
@@ -653,7 +657,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const entry = catalog.entries.find((x) => x.id === b.dataset.id || x.name === b.dataset.name);
     const title = entry ? (entry.title || entry.name) : (b.dataset.repo || '');
     if (b.dataset.cat === 'install') {
-      catalogAction('install', { id: b.dataset.id }, t('what.installing', { title }));
+      catalogAction('install', { id: b.dataset.id }, t('what.installing', { title }), title);
     } else if (b.dataset.cat === 'uninstall') {
       if (armed !== b.dataset.name) {
         armed = b.dataset.name;

@@ -104,5 +104,6 @@ The service installs its own boot watchdog units in `/etc/systemd/system` (lintu
 - The service must run in the host's mount namespace: `systemd-sysext refresh` from a private namespace changes only the service's view. `cmd/modmanager/unit_test.go` keeps namespace directives (`Protect*`, `Private*`, …) out of the unit; the manager also checks `/proc/self/ns/mnt` against PID 1 before every action.
 - `go test -race ./...` — the permission tests use the real `sqlite3` binary against the schema measured on 1.8.0.
 - Releases: see [RELEASING.md](RELEASING.md). After publishing a release, check it against a host that runs it: `python3 scripts/catalog-e2e.py --url http://<zimaos-host> --user <name> --password-file <file>`. It adds this repository to the catalog, asserts that the release image is picked and the installed version is current, then removes the repository again. `--selftest` runs without a host.
+- Browser check of the page (Playwright, every API call answered in the test, no host): `~/.venvs/playwright/bin/python3 scripts/ui-install-hint.py` — after an install the status line says to reload the ZimaOS dashboard, in en/de/fr; a failed install shows only the error.
 
 MIT License, see [LICENSE](LICENSE).
