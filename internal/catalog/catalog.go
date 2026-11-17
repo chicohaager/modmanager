@@ -1115,11 +1115,118 @@ func (c *Catalog) Uninstall(ctx context.Context, name string) error {
 	if !c.isInstalled(name) {
 		return ErrNotInstalled
 	}
-	if _, err := c.change(ctx, "zpkg", "remove", name); err != nil {
+	// The image still lists the module's services: their boot watchdogs in /etc
+	// and the services' enable links go with the module (zpkg remove leaves them).
+	files, err := c.imageFiles(ctx, c.installedFile(name))
+	if err != nil {
 		return err
 	}
-	_, err := c.change(ctx, "systemctl", "daemon-reload")
-	return err
+	services := unitFiles(files)
+	dogs := c.watchdogUnits(services)
+	var running []string // timers and paths stopped here, started again if the removal fails
+	if len(dogs) > 0 {
+		c.Progress.Stepf("watchdogs", "Removing the module's boot watchdogs in /etc/systemd/system ({n})", "n", fmt.Sprint(len(dogs)))
+	}
+	for _, d := range dogs {
+		if strings.HasSuffix(d, ".timer") || strings.HasSuffix(d, ".path") {
+			if _, err := c.change(ctx, "systemctl", "disable", "--now", d); err != nil {
+				return c.restartDogs(ctx, running, err)
+			}
+			running = append(running, d)
+		}
+	}
+	var plain []string
+	for _, u := range services {
+		if strings.HasSuffix(u, "@.service") { // a template has no enable link of its own
+			continue
+		}
+		plain = append(plain, u)
+		// only an enabled unit has links to remove; disabling a static one prints a page of warnings
+		if out, _ := c.Run(ctx, "systemctl", "is-enabled", u); strings.TrimSpace(string(out)) != "enabled" {
+			continue
+		}
+		if _, err := c.change(ctx, "systemctl", "disable", u); err != nil {
+			return c.restartDogs(ctx, running, err)
+		}
+	}
+	if _, err := c.change(ctx, "zpkg", "remove", name); err != nil {
+		return c.restartDogs(ctx, running, err)
+	}
+	etc := filepath.Join(c.Root, "etc/systemd/system")
+	for _, d := range dogs {
+		if err := os.Remove(filepath.Join(etc, d)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("remove watchdog %s: %w", d, err)
+		}
+	}
+	if _, err = c.change(ctx, "systemctl", "daemon-reload"); err != nil {
+		return err
+	}
+	if len(plain) > 0 {
+		// a service that had failed would stay listed as "not-found failed" until the next boot
+		_, _ = c.Run(ctx, "systemctl", append([]string{"reset-failed"}, plain...)...)
+	}
+	return nil
+}
+
+// restartDogs starts the watchdog timers and paths Uninstall stopped again:
+// the module is still installed and needs them at the next boot.
+func (c *Catalog) restartDogs(ctx context.Context, units []string, cause error) error {
+	for _, u := range units {
+		if _, err := c.change(ctx, "systemctl", "enable", "--now", u); err != nil {
+			return fmt.Errorf("%w; starting %s again failed too: %v", cause, u, err)
+		}
+	}
+	return cause
+}
+
+// watchdogUnits lists the boot watchdogs in /etc/systemd/system that belong to
+// a module's services: lintux-modkit watchdog.Install writes
+// <s>-watchdog.{service,timer} and <s>-refresh.{path,service}, its
+// sysext/unit-watchdog.sh <s>-watchdog.{service,timer} with "@" of a template
+// instance turned into "-". A file counts only if it is a regular file whose
+// Description names that service, so a unit of the same name someone else
+// wrote stays.
+func (c *Catalog) watchdogUnits(services []string) []string {
+	etc := filepath.Join(c.Root, "etc/systemd/system")
+	var out []string
+	seen := map[string]bool{}
+	add := func(file, want string) {
+		if seen[file] {
+			return
+		}
+		fi, err := os.Lstat(filepath.Join(etc, file))
+		if err != nil || !fi.Mode().IsRegular() {
+			return
+		}
+		b, err := os.ReadFile(filepath.Join(etc, file))
+		if err != nil {
+			return
+		}
+		for _, l := range strings.Split(string(b), "\n") {
+			if d, ok := strings.CutPrefix(strings.TrimSpace(l), "Description="); ok && strings.Contains(" "+d+" ", want) {
+				seen[file] = true
+				out = append(out, file)
+				return
+			}
+		}
+	}
+	for _, u := range services {
+		base := strings.TrimSuffix(u, ".service")
+		if tmpl, ok := strings.CutSuffix(base, "@"); ok {
+			for _, kind := range []string{"service", "timer"} {
+				m, _ := filepath.Glob(filepath.Join(etc, tmpl+"-*-watchdog."+kind))
+				for _, f := range m {
+					add(filepath.Base(f), " "+tmpl+"@")
+				}
+			}
+			continue
+		}
+		for _, f := range []string{"-watchdog.service", "-watchdog.timer", "-refresh.path", "-refresh.service"} {
+			add(base+f, " "+base+" ") // watchdog.Install: "Start nebula-web if …"
+			add(base+f, " "+u+" ")    // unit-watchdog.sh: "Start nebula.service if …"
+		}
+	}
+	return out
 }
 
 // staleUnits lists the services of an installed module that run an older
