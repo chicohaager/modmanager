@@ -37,4 +37,6 @@
 
    It must end with `✓ … release image picked, installed version current` and leave the catalog as it was.
 
-5. **Run the README install path as written**, line by line, in the ZimaOS terminal of a host (after `sudo zpkg remove modmanager`), then check `/modmanager/health` for the new version. The catalog check above does not cover it: on 22.10.2026 the README told users to install the downloaded file without renaming it, and `zpkg` refused it.
+5. **Run the README install path as written**, line by line, in the ZimaOS terminal of a host, then check `/modmanager/health` for the new version. The catalog check above does not cover it: on 22.10.2026 the README told users to install the downloaded file without renaming it, and `zpkg` refused it.
+
+   On a host that already runs the Module Manager, end with the README's "Update by hand" line instead of the first-install line: the download, checksum and rename lines are the same, and `zpkg install --force` refuses a wrongly named file with the same `module not pass validate` (ZIMAOS-KNOWLEDGE §7.4.1). It costs one `systemd-sysext refresh`; `sudo zpkg remove modmanager` followed by the first install costs two. Every refresh keeps one loop device per extension until the next reboot (on 15.11.2026 remove + install took the test host from 186 to 227). Run the first-install line itself only on a host without the module, or right before a planned reboot.
