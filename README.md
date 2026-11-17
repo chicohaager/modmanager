@@ -68,6 +68,8 @@ Language: English, German or French. **auto** follows the ZimaOS user's language
 sh build.sh amd64      # vet, tests, node --check, go build, sysext via ../lintux-modkit/sysext/build-sysext.sh
 ```
 
+`build.sh` builds only against the lintux-modkit commit in `lintux-modkit.ref`, without local changes — both for the scripts (`../lintux-modkit` or `LINTUX_MODKIT=`) and for the directory Go compiles (go.mod's `replace` or a `go.work`; `LINTUX_MODKIT` does not move it): `scripts/modkit-check.sh` asks `go list` which one that is. `MODKIT_DEV=1` builds anyway, with a warning, not for a release. `sh scripts/test-modkit-check.sh` tests the check (CI runs it).
+
 Output in `dist/`: `modmanager-amd64.raw` (+ `.sha256`) and `modmanager.raw`.
 
 ## Install (on the ZimaOS host)
