@@ -14,7 +14,7 @@ grep -q "^\*\*Version $VERSION\*\*" README.md \
   || { echo "README.md header: '$(grep -m1 -o '^\*\*Version [^*]*' README.md)', code: $VERSION" >&2; exit 1; }
 
 MODKIT="${LINTUX_MODKIT:-../lintux-modkit}"
-sh scripts/modkit-check.sh "$MODKIT"   # the lintux-modkit commit of lintux-modkit.ref, no local changes
+sh scripts/modkit-check.sh "$MODKIT"   # the lintux-modkit commit of lintux-modkit.ref, for the scripts and for Go, no local changes
 go vet ./...
 go test -count=1 ./...
 node --check "$WEB/app.js"
