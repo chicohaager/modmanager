@@ -2,9 +2,11 @@
 
 Releases: https://github.com/chicohaager/modmanager/releases. Every release is amd64 only and tested on a ZimaBoard 2 with ZimaOS 1.8.0.
 
-## Unreleased
+## 0.3.4 — 2026-11-17
 
 - **Removing a module also removes its boot watchdogs** in `/etc/systemd/system`: the units lintux-modkit writes for a module's tile (`<service>-watchdog.timer/.service`, `<service>-refresh.path/.service`) and the start watchdog of `sysext/unit-watchdog.sh` (`<unit>-watchdog.timer/.service`, also for template instances). `zpkg remove` left them behind — measured on ZimaOS 1.8.0 on 2026-11-17: 8 unit files after removing Nebula and node-exporter, two timers still enabled, which would keep trying to start a service that no longer exists. The module's services are disabled first, so no enable link points at a unit that is gone. A unit is removed only if it is a regular file whose description names one of the module's services; a file of the same name someone else wrote stays. If `zpkg remove` fails, the module stays installed and its watchdogs are started again.
+- Build: `LINTUX_MODKIT` names the lintux-modkit checkout for the commit check and for `build-sysext.sh` (default `../lintux-modkit`, as before). Before, `build.sh` packed the image with the sibling's `build-sysext.sh` whatever `lintux-modkit.ref` said.
+- Built against lintux-modkit v0.1.4 (unchanged); Go toolchain 1.27.4.
 
 ## 0.3.3 — 2026-11-15
 
