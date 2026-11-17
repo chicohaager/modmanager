@@ -16,7 +16,11 @@ check() { # name, want rc, env, text the output must contain
 echo "vX $B" > lintux-modkit.ref; check "sibling on the pinned commit" 0 "" "lintux-modkit vX"
 echo "vX $A" > lintux-modkit.ref; check "sibling on another commit" 1 "" "refused: lintux-modkit at"
 check "another commit with MODKIT_DEV=1" 0 "MODKIT_DEV=1" "WARNING"
+# without an argument the check takes LINTUX_MODKIT, like build.sh of the module repos (~/.claude/bin/build-pinned.sh sets it)
+echo "vX $B" > lintux-modkit.ref
+out=$(LINTUX_MODKIT="$T/m" sh scripts/modkit-check.sh 2>&1); rc=$?
+case "$rc:$out" in "0:"*"lintux-modkit vX"*) echo "ok   LINTUX_MODKIT without an argument (rc=$rc)" ;; *) echo "FAIL LINTUX_MODKIT without an argument: rc=$rc: $out"; F=$((F + 1)) ;; esac
 echo "vX $B" > lintux-modkit.ref; touch "$T/m/stray"; check "pinned commit with local changes" 1 "" "with local changes"
 cp "$T/ref.keep" lintux-modkit.ref
-[ $F = 0 ] && echo "✓ modkit-check: 4 cases" || echo "✗ modkit-check: $F failed"
+[ $F = 0 ] && echo "✓ modkit-check: 5 cases" || echo "✗ modkit-check: $F failed"
 exit $F

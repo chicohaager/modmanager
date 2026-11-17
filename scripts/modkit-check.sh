@@ -2,10 +2,11 @@
 # The release is built against the lintux-modkit commit CI checks out (lintux-modkit.ref:
 # "<tag> <commit>"): build.sh refuses a sibling checkout on another commit or with local
 # changes, so a local build cannot carry other modkit code than the tested one.
-#   sh scripts/modkit-check.sh [<modkit dir>]     MODKIT_DEV=1 allows it, with a warning (not for a release)
+#   sh scripts/modkit-check.sh [<modkit dir>]     (default: $LINTUX_MODKIT, else ../lintux-modkit)
+#       MODKIT_DEV=1 allows it, with a warning (not for a release)
 set -eu
 cd "$(dirname "$0")/.."
-M="${1:-../lintux-modkit}"
+M="${1:-${LINTUX_MODKIT:-../lintux-modkit}}"   # LINTUX_MODKIT as in the module repos' build.sh
 read -r TAG COMMIT < lintux-modkit.ref
 HEAD=$(git -C "$M" rev-parse HEAD)
 DIRTY=$(git -C "$M" status --porcelain)
