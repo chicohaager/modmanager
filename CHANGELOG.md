@@ -2,6 +2,10 @@
 
 Releases: https://github.com/chicohaager/modmanager/releases. Every release is amd64 only and tested on a ZimaBoard 2 with ZimaOS 1.8.0.
 
+## Unreleased
+
+- **After an install, update or restart from the catalog the status line says to reload the ZimaOS dashboard** if the module has a tile (en/de/fr). An open ZimaOS 1.8 dashboard does not show a newly installed module's tile by itself — measured on ZimaOS 1.8.0 on 2026-11-17: no tile after 120 s, the tile after a reload. Hiding and restoring a built-in app already said so. Browser check: `scripts/ui-install-hint.py`.
+
 ## 0.3.4 — 2026-11-17
 
 - **Removing a module also removes its boot watchdogs** in `/etc/systemd/system`: the units lintux-modkit writes for a module's tile (`<service>-watchdog.timer/.service`, `<service>-refresh.path/.service`) and the start watchdog of `sysext/unit-watchdog.sh` (`<unit>-watchdog.timer/.service`, also for template instances). `zpkg remove` left them behind — measured on ZimaOS 1.8.0 on 2026-11-17: 8 unit files after removing Nebula and node-exporter, two timers still enabled, which would keep trying to start a service that no longer exists. The module's services are disabled first, so no enable link points at a unit that is gone. A unit is removed only if it is a regular file whose description names one of the module's services; a file of the same name someone else wrote stays. If `zpkg remove` fails, the module stays installed and its watchdogs are started again.
