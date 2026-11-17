@@ -135,6 +135,10 @@ type recorder struct {
 	// instances answers `systemctl list-units … <template>@*.service`.
 	units     map[string][2]string
 	instances map[string]string
+	// failRemove makes `zpkg remove <name>` fail.
+	failRemove map[string]bool
+	// enabled answers `systemctl is-enabled <unit>`: "enabled" for these, else "static".
+	enabled map[string]bool
 }
 
 func (r *recorder) run(_ context.Context, name string, args ...string) ([]byte, error) {
@@ -159,6 +163,12 @@ func (r *recorder) run(_ context.Context, name string, args ...string) ([]byte, 
 		case args[2] == "ExecStart":
 			return []byte("{ path=" + u[1] + " ; argv[]=" + u[1] + " serve ; ignore_errors=no }\n"), nil
 		}
+	}
+	if name == "systemctl" && len(args) == 2 && args[0] == "is-enabled" {
+		if r.enabled[args[1]] {
+			return []byte("enabled\n"), nil
+		}
+		return []byte("static\n"), errors.New("exit status 1")
 	}
 	if name == "systemctl" && len(args) == 5 && args[0] == "list-units" {
 		return []byte(r.instances[args[4]]), nil
@@ -193,6 +203,9 @@ func (r *recorder) run(_ context.Context, name string, args ...string) ([]byte, 
 		return nil, os.WriteFile(filepath.Join(r.ext, filepath.Base(args[1])), b, 0o644)
 	}
 	if name == "zpkg" && len(args) == 2 && args[0] == "remove" {
+		if r.failRemove[args[1]] {
+			return []byte("remove failed"), errors.New("exit status 1")
+		}
 		// as the real one: the module's image leaves /var/lib/extensions
 		_ = os.Remove(filepath.Join(r.ext, args[1]+".raw"))
 	}
@@ -512,6 +525,102 @@ func TestUninstallGuards(t *testing.T) {
 	must(t, c.Uninstall(ctx, "cron"))
 	if !rec.has("zpkg remove cron") || !rec.has("systemctl daemon-reload") {
 		t.Fatalf("uninstall: %v", rec.cmds)
+	}
+}
+
+// Uninstall also removes the boot watchdogs a module wrote to /etc/systemd/system
+// (lintux-modkit watchdog.Install and sysext/unit-watchdog.sh): `zpkg remove` leaves
+// them, measured 17.11.2026 on ZimaOS 1.8.0 — 8 unit files after removing nebula and
+// node-exporter, two timers still enabled. Files of other units stay.
+func TestUninstallRemovesTheModulesWatchdogs(t *testing.T) {
+	c, _, rec := setup(t)
+	ctx := context.Background()
+	rec.lists = map[string]string{"neb": "squashfs-root/usr/lib/systemd/system/nebula.service\n" +
+		"squashfs-root/usr/lib/systemd/system/nebula-web.service\nsquashfs-root/usr/lib/systemd/system/neb@.service\n" +
+		"squashfs-root/usr/bin/nebula\n"}
+	rec.enabled = map[string]bool{"nebula-web.service": true} // nebula.service is static
+	must(t, os.WriteFile(filepath.Join(rec.ext, "nebula.raw"), []byte("neb"), 0o644))
+	etc := filepath.Join(c.Root, "etc/systemd/system")
+	must(t, os.MkdirAll(etc, 0o755))
+	put := func(name, desc string) {
+		must(t, os.WriteFile(filepath.Join(etc, name), []byte("[Unit]\nDescription="+desc+"\n"), 0o644))
+	}
+	// watchdog.Install for nebula-web
+	put("nebula-web-watchdog.service", "Start nebula-web if it is not running")
+	put("nebula-web-watchdog.timer", "Start nebula-web if the sysext unit was missed at boot")
+	put("nebula-web-refresh.path", "Watch the nebula-web binary for updates")
+	put("nebula-web-refresh.service", "Restart nebula-web after a binary update")
+	// unit-watchdog.sh for nebula.service and a template instance
+	put("nebula-watchdog.service", "Start nebula.service if it is not running")
+	put("nebula-watchdog.timer", "Start nebula.service if the sysext unit was missed at boot")
+	put("neb-home-watchdog.timer", "Start neb@home.service if the sysext unit was missed at boot")
+	put("neb-home-watchdog.service", "Start neb@home.service if it is not running")
+	// not the module's: another service, a file of the same name someone else wrote, a symlink
+	put("nebula-webui-watchdog.timer", "Start nebula-webui if the sysext unit was missed at boot")
+	put("nebula-refresh.path", "my own path unit")
+	must(t, os.Symlink("/dev/null", filepath.Join(etc, "nebula-refresh.service")))
+	must(t, c.Uninstall(ctx, "nebula"))
+	gone := []string{"nebula-web-watchdog.service", "nebula-web-watchdog.timer", "nebula-web-refresh.path",
+		"nebula-web-refresh.service", "nebula-watchdog.service", "nebula-watchdog.timer",
+		"neb-home-watchdog.timer", "neb-home-watchdog.service"}
+	for _, f := range gone {
+		if _, err := os.Lstat(filepath.Join(etc, f)); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s left behind (%v)", f, err)
+		}
+	}
+	for _, f := range []string{"nebula-webui-watchdog.timer", "nebula-refresh.path", "nebula-refresh.service"} {
+		if _, err := os.Lstat(filepath.Join(etc, f)); err != nil {
+			t.Errorf("%s removed although it is not the module's: %v", f, err)
+		}
+	}
+	// timers and paths are stopped before the image goes, the services disabled, reload at the end
+	idx := func(cmd string) int {
+		for i, l := range rec.cmds {
+			if l == cmd {
+				return i
+			}
+		}
+		t.Fatalf("%q not run: %v", cmd, rec.cmds)
+		return -1
+	}
+	rm := idx("zpkg remove nebula")
+	for _, u := range []string{"nebula-web-watchdog.timer", "nebula-web-refresh.path", "nebula-watchdog.timer", "neb-home-watchdog.timer"} {
+		if idx("systemctl disable --now "+u) > rm {
+			t.Errorf("%s stopped after zpkg remove", u)
+		}
+	}
+	if idx("systemctl disable nebula-web.service") > rm {
+		t.Error("nebula-web.service disabled after zpkg remove")
+	}
+	if rec.has("systemctl disable nebula.service") {
+		t.Error("a static unit was disabled (systemctl prints a page of warnings for it)")
+	}
+	if idx("systemctl daemon-reload") < rm {
+		t.Error("daemon-reload before zpkg remove")
+	}
+	// a service that failed (a restart loop) would stay listed as "not-found failed"
+	if idx("systemctl reset-failed nebula.service nebula-web.service") < idx("systemctl daemon-reload") {
+		t.Error("reset-failed before daemon-reload")
+	}
+}
+
+// When zpkg remove fails, the module stays installed: its watchdogs stay too and run again.
+func TestUninstallKeepsWatchdogsWhenRemoveFails(t *testing.T) {
+	c, _, rec := setup(t)
+	rec.lists = map[string]string{"neb": "squashfs-root/usr/lib/systemd/system/nebula-web.service\n"}
+	rec.failRemove = map[string]bool{"nebula": true}
+	must(t, os.WriteFile(filepath.Join(rec.ext, "nebula.raw"), []byte("neb"), 0o644))
+	etc := filepath.Join(c.Root, "etc/systemd/system")
+	must(t, os.MkdirAll(etc, 0o755))
+	must(t, os.WriteFile(filepath.Join(etc, "nebula-web-watchdog.timer"), []byte("[Unit]\nDescription=Start nebula-web if the sysext unit was missed at boot\n"), 0o644))
+	if err := c.Uninstall(context.Background(), "nebula"); err == nil {
+		t.Fatal("no error")
+	}
+	if _, err := os.Stat(filepath.Join(etc, "nebula-web-watchdog.timer")); err != nil {
+		t.Fatalf("watchdog removed although the module stayed: %v", err)
+	}
+	if !rec.has("systemctl enable --now nebula-web-watchdog.timer") {
+		t.Fatalf("watchdog not started again: %v", rec.cmds)
 	}
 }
 
