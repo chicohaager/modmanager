@@ -2,9 +2,11 @@
 
 Releases: https://github.com/chicohaager/modmanager/releases. Every release is amd64 only and tested on a ZimaBoard 2 with ZimaOS 1.8.0.
 
-## Unreleased
+## 0.3.5 — 2026-11-17
 
 - **After an install, update or restart from the catalog the status line says to reload the ZimaOS dashboard** if the module has a tile (en/de/fr). An open ZimaOS 1.8 dashboard does not show a newly installed module's tile by itself — measured on ZimaOS 1.8.0 on 2026-11-17: no tile after 120 s, the tile after a reload. Hiding and restoring a built-in app already said so. Browser check: `scripts/ui-install-hint.py`.
+- Build: the lintux-modkit commit check (`scripts/modkit-check.sh`) also checks the checkout Go compiles against, not only the one the build scripts come from; its test `scripts/test-modkit-check.sh` (9 cases, POSIX sh) runs in CI.
+- Built against lintux-modkit v0.1.5 (v0.1.4 plus a newer Debian snapshot in `bundle-debian.sh`, which this module does not use); Go toolchain 1.27.4.
 
 ## 0.3.4 — 2026-11-17
 
